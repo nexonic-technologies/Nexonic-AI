@@ -18,6 +18,9 @@ Classification: **Implemented** · **Tested** · **Experimental** · **Blocked**
 | Live system detection (chip, memory, OS) | Tested | `system_info` command + Rust test |
 | Permissions UI wired to Rust (toggle, emergency stop, resume) | Implemented | Awareness panel |
 | Today's Focus (local task list) | Implemented | stored locally; moves to encrypted SQLite with M20 |
+| Encrypted persistent memory (SQLite + XChaCha20-Poly1305, Keychain key) | Tested | `crates/memory-engine/src/persist.rs`, 6 tests |
+| Typography system + motion typography | Implemented | Sora / Geist / Geist Mono, `MotionText.tsx` |
+| Talking Sharee/Nexa (on-device: Kokoro → JoyVASA → LivePortrait MLX) | Experimental | `services/presence`, `Presence probe` workflow |
 | Agents, collaboration feed, memory events, voice | Pending | panels show honest empty states until M16/M17/M28 |
 | Character art | Interim | owner concept art; real-time digital humans in M15 |
 | Agents, model routing, voice, awareness, automation | Pending | Phases C–E |

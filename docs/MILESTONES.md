@@ -23,7 +23,7 @@ Status: ✅ done · 🔶 in progress · ⛔ blocked · ⬜ pending
 | M12 | Awareness, Activity, Computer Control interfaces | ⬜ |
 | M13 | Voice and Personality Studios | ⬜ |
 | M14 | Floating assistants and background interface | ⬜ |
-| M15 | Digital-human rendering infrastructure | ⬜ |
+| M15 | Digital-human rendering infrastructure | 🔶 on-device talking probe (LivePortrait + JoyVASA MLX) |
 
 ## Phase C — Core intelligence
 | | Milestone | Status |
@@ -32,7 +32,7 @@ Status: ✅ done · 🔶 in progress · ⛔ blocked · ⬜ pending
 | M17 | OpenRouter and BYOK providers | ⬜ |
 | M18 | Embedded local inference | ⬜ |
 | M19 | Multi-model routing | ⬜ |
-| M20 | Independent cognitive memory engines | 🔶 storage-level isolation done |
+| M20 | Independent cognitive memory engines | 🔶 isolation + encrypted persistence done |
 | M21 | Collective Intelligence and agent communication | ⬜ |
 | M22 | Confidentiality and information-flow enforcement | 🔶 storage layer done |
 | M23 | Memory consolidation | ⬜ |

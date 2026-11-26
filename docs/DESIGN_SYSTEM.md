@@ -39,20 +39,30 @@ final values; every change is recorded here.
 
 ## Typography
 
-Inter with SF Pro as the native fallback; one family, variable weights, tabular numbers
-for figures. Urdu/Arabic-script text uses a script-appropriate fallback with right-to-left
-layout.
+Three OFL families, one system:
 
-| Style | Size / weight |
+| Role | Family | Used for |
+|---|---|---|
+| Display | **Sora** | brand wordmark, agent names, headings, panel titles, core label |
+| Text | **Geist** | navigation, body copy, buttons, inputs |
+| System | **Geist Mono** | statuses, counts, timestamps, keys, pills (tabular figures) |
+
+| Style | Spec |
 |---|---|
-| H1 | 48 / Bold |
-| H2 | 36 / Semibold |
-| H3 | 28 / Semibold |
-| H4 | 20 / Medium |
-| Body Large | 16 / Regular |
-| Body | 14 / Regular |
-| Body Small | 12 / Medium |
-| Caption | 11 / Medium |
+| Brand | Sora 700 25px, +0.06em; subline Geist Mono 9.5px, +0.32em |
+| Agent name | Sora 600 34px (30px on short screens), +0.16em, uppercase |
+| Window title | Sora 500 18px |
+| Panel title | Sora 500 16px, −0.012em |
+| Core label | Sora 500 14px, +0.22em, uppercase |
+| Body / nav | Geist 14–15px; supporting 12px muted |
+| Meta / status | Geist Mono 10–11px, uppercase, +0.06–0.14em |
+
+**Motion typography:** letter reveals (rise from blur, staggered), a light wave across the agent
+names every few seconds, decoding text for system labels, rolling transitions for statuses and
+dock hints, animated counters. All disabled by `prefers-reduced-motion`.
+
+**Layout check:** verified at 1280×800, 1512×945, 1728×1080 and 1920×1080 — no overlaps, clipped
+text or page overflow (automated check in the review script).
 
 ## Spacing, grid, radius
 
