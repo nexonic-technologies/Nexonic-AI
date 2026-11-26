@@ -18,6 +18,23 @@ export interface PermissionsView {
   items: { capability: Capability; granted: boolean }[];
 }
 
+export interface MemorySummary {
+  userVisible: number;
+  encrypted: boolean;
+  persistent: boolean;
+}
+
+export interface MemoryView {
+  id: number;
+  domain: "sharee" | "nexa" | "collective";
+  kind: string;
+  text: string;
+  source: string;
+  confidence: number;
+  neverShareWith: string[];
+  createdAt: number;
+}
+
 export type Capability =
   | "Camera"
   | "Microphone"
@@ -49,7 +66,17 @@ export const ipc = {
     call<PermissionsView>("set_permission", { capability, granted }),
   emergencyStop: () => call<PermissionsView>("emergency_stop"),
   resume: () => call<PermissionsView>("resume"),
-  memorySummary: () => call<{ userVisible: number }>("memory_summary"),
+  memorySummary: () => call<MemorySummary>("memory_summary"),
+  memoriesRecent: (limit = 20) => call<MemoryView[]>("memories_recent", { limit }),
+  rememberNote: (
+    text: string,
+    domain: "sharee" | "nexa" | "collective" = "collective",
+    kind = "semantic",
+    neverShareWith: string[] = [],
+  ) => call<MemoryView>("remember_note", { text, domain, kind, neverShareWith }),
+  forgetMemory: (id: number) => call<void>("forget_memory", { id }),
+  kvGet: (key: string) => call<string | null>("kv_get", { key }),
+  kvSet: (key: string, value: string) => call<void>("kv_set", { key, value }),
 };
 
 export const capabilityLabel: Record<Capability, string> = {

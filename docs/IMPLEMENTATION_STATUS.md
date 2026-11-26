@@ -9,7 +9,7 @@ Classification: **Implemented** · **Tested** · **Experimental** · **Blocked**
 | Private-file blocking | Tested | `.gitignore`, pre-commit hook, `Guard` job |
 | Permission model with emergency stop | Tested | `crates/permissions`, `cargo test` in `Rust` workflow |
 | Three-domain memory isolation (storage layer) | Tested | `crates/memory-engine`, `cargo test` |
-| Encrypted persistence (SQLite + XChaCha20-Poly1305) | Tested | `crates/memory-engine/src/persist.rs`, 6 tests (wiring to `AppState` + Keychain + consolidation pending in M20/M23) |
+| Encrypted persistence (SQLite + XChaCha20-Poly1305) | Tested | `crates/memory-engine/src/persist.rs` wired into `AppState` (`keychain.rs`, `memory.sqlite`); consolidation pending in M23 |
 | Design system tokens and dashboard spec | Implemented | `docs/DESIGN_SYSTEM.md`, `packages/design-system` |
 | macOS app shell (Tauri 2 + React) | Implemented | `apps/desktop`; `Desktop` workflow builds the arm64 .app/.dmg |
 | Main dashboard layout (matches owner reference) | Implemented | header, sidebar, presence, core, modes, 4 panels, dock |
@@ -17,8 +17,8 @@ Classification: **Implemented** · **Tested** · **Experimental** · **Blocked**
 | Interface motion (staged entrance, portrait parallax, cursor panel light, sliding mode ink, node connector glow, dock halo; reduced-motion = off) | Implemented | `styles/app.css` motion section |
 | Live system detection (chip, memory, OS) | Tested | `system_info` command + Rust test |
 | Permissions UI wired to Rust (toggle, emergency stop, resume) | Implemented | Awareness panel |
-| Today's Focus (local task list) | Implemented | stored locally; moves to encrypted SQLite with M20 |
-| Encrypted persistent memory (SQLite + XChaCha20-Poly1305, Keychain key) | Tested | `crates/memory-engine/src/persist.rs`, 6 tests |
+| Today's Focus (encrypted task list) | Implemented | stored in encrypted SQLite `kv` inside Tauri (`localStorage` fallback in browser preview) |
+| Encrypted persistent memory (SQLite + XChaCha20-Poly1305, Keychain key) | Tested | `apps/desktop/src-tauri/src/lib.rs` + `keychain.rs` + `crates/memory-engine/src/persist.rs` |
 | Typography system + motion typography | Implemented | Sora / Geist / Geist Mono, `MotionText.tsx` |
 | Talking Sharee/Nexa (on-device: Kokoro → JoyVASA → LivePortrait MLX → MuseTalk 1.5 MLX) | Experimental | `services/presence`, `Presence probe` workflow; persona/expression specs in `personas.json` |
 | Agents, collaboration feed, memory events, voice | Pending | panels show honest empty states until M16/M17/M28 |
@@ -28,5 +28,4 @@ Classification: **Implemented** · **Tested** · **Experimental** · **Blocked**
 
 ## Next actionable task
 
-Add encrypted SQLite persistence (memory + focus list) and the model router (M17: OpenRouter free models first) so Sharee and Nexa come online to `memory-engine` behind the same isolation API, then start
-`model-router` (OpenRouter catalogue, free-only default, cooldown fallback).
+Build `crates/model-router` (M17: OpenRouter catalogue, free-only default, cooldown fallback, Keychain key) and wire Sharee and Nexa agent runtimes (M16) to `memory-engine`, alongside the M15 real-time Presence sidecar.

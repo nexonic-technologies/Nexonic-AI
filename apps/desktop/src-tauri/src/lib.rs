@@ -1,27 +1,46 @@
 //! Nexonic AI desktop core: typed commands the interface calls over Tauri IPC.
 //!
 //! Everything returned here is real state: detected hardware, the live
-//! permission set and the memory store. Nothing is hardcoded or simulated.
+//! permission set and the encrypted SQLite memory store. Nothing is hardcoded or
+//! simulated.
 
+mod keychain;
+
+use std::collections::BTreeSet;
+use std::path::Path;
 use std::sync::Mutex;
 
-use nexonic_memory_engine::{MemoryStore, Reader};
+use nexonic_memory_engine::persist::{generate_key, PersistentMemory};
+use nexonic_memory_engine::{AgentId, Domain, Kind, Memory, MemoryId, NewMemory, Reader};
 use nexonic_permissions::{Actor, Capability, Decision, Permissions, Scope};
 use serde::Serialize;
-use tauri::State;
+use tauri::{Manager, State};
 
 /// Shared application state behind the IPC boundary.
 pub struct AppState {
     permissions: Mutex<Permissions>,
-    memory: Mutex<MemoryStore>,
+    memory: Mutex<PersistentMemory>,
+    persistent: bool,
 }
 
-impl Default for AppState {
-    fn default() -> Self {
-        Self {
+impl AppState {
+    pub fn open_persistent(path: &Path, key: &[u8; 32]) -> Result<Self, String> {
+        let mem = PersistentMemory::open(path, key).map_err(|e| e.to_string())?;
+        Ok(Self {
             permissions: Mutex::new(Permissions::new()),
-            memory: Mutex::new(MemoryStore::new()),
-        }
+            memory: Mutex::new(mem),
+            persistent: true,
+        })
+    }
+
+    pub fn in_memory_for_tests() -> Result<Self, String> {
+        let key = generate_key();
+        let mem = PersistentMemory::open_in_memory(&key).map_err(|e| e.to_string())?;
+        Ok(Self {
+            permissions: Mutex::new(Permissions::new()),
+            memory: Mutex::new(mem),
+            persistent: false,
+        })
     }
 }
 
@@ -150,6 +169,93 @@ fn resume(state: State<'_, AppState>) -> Result<PermissionsView, String> {
 #[serde(rename_all = "camelCase")]
 pub struct MemorySummary {
     pub user_visible: usize,
+    pub encrypted: bool,
+    pub persistent: bool,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryView {
+    pub id: u64,
+    pub domain: String,
+    pub kind: String,
+    pub text: String,
+    pub source: String,
+    pub confidence: f32,
+    pub never_share_with: Vec<String>,
+    pub created_at: u64,
+}
+
+fn agent_label(a: AgentId) -> &'static str {
+    match a {
+        AgentId::Sharee => "sharee",
+        AgentId::Nexa => "nexa",
+    }
+}
+
+fn domain_label(d: Domain) -> &'static str {
+    match d {
+        Domain::Private(AgentId::Sharee) => "sharee",
+        Domain::Private(AgentId::Nexa) => "nexa",
+        Domain::Collective => "collective",
+    }
+}
+
+fn kind_label(k: Kind) -> &'static str {
+    match k {
+        Kind::Episodic => "episodic",
+        Kind::Semantic => "semantic",
+        Kind::Procedural => "procedural",
+        Kind::Preference => "preference",
+        Kind::Prospective => "prospective",
+        Kind::Reflective => "reflective",
+    }
+}
+
+fn memory_to_view(m: &Memory) -> MemoryView {
+    MemoryView {
+        id: m.id.0,
+        domain: domain_label(m.domain).into(),
+        kind: kind_label(m.kind).into(),
+        text: m.text.clone(),
+        source: m.source.clone(),
+        confidence: m.confidence,
+        never_share_with: m
+            .never_share_with
+            .iter()
+            .map(|a| agent_label(*a).into())
+            .collect(),
+        created_at: m.created_at,
+    }
+}
+
+fn parse_domain_arg(raw: Option<&str>) -> Result<Domain, String> {
+    match raw.unwrap_or("collective") {
+        "collective" => Ok(Domain::Collective),
+        "sharee" => Ok(Domain::Private(AgentId::Sharee)),
+        "nexa" => Ok(Domain::Private(AgentId::Nexa)),
+        other => Err(format!("unknown memory domain: {other}")),
+    }
+}
+
+fn parse_kind_arg(raw: Option<&str>) -> Result<Kind, String> {
+    match raw.unwrap_or("semantic") {
+        "episodic" => Ok(Kind::Episodic),
+        "semantic" => Ok(Kind::Semantic),
+        "procedural" => Ok(Kind::Procedural),
+        "preference" => Ok(Kind::Preference),
+        "prospective" => Ok(Kind::Prospective),
+        "reflective" => Ok(Kind::Reflective),
+        other => Err(format!("unknown memory kind: {other}")),
+    }
+}
+
+fn parse_agent_arg(raw: &str) -> Result<AgentId, String> {
+    match raw {
+        "sharee" => Ok(AgentId::Sharee),
+        "nexa" => Ok(AgentId::Nexa),
+        other => Err(format!("unknown agent: {other}")),
+    }
 }
 
 #[tauri::command]
@@ -157,19 +263,109 @@ fn memory_summary(state: State<'_, AppState>) -> Result<MemorySummary, String> {
     let m = state.memory.lock().map_err(|e| e.to_string())?;
     Ok(MemorySummary {
         user_visible: m.context_for(Reader::User).len(),
+        encrypted: true,
+        persistent: state.persistent,
     })
+}
+
+#[tauri::command]
+fn memories_recent(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<Vec<MemoryView>, String> {
+    let m = state.memory.lock().map_err(|e| e.to_string())?;
+    let cap = limit.unwrap_or(20).clamp(1, 200);
+    Ok(m.recent(Reader::User, cap)
+        .into_iter()
+        .map(memory_to_view)
+        .collect())
+}
+
+#[tauri::command]
+fn remember_note(
+    state: State<'_, AppState>,
+    text: String,
+    domain: Option<String>,
+    kind: Option<String>,
+    never_share_with: Option<Vec<String>>,
+) -> Result<MemoryView, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("memory text must not be empty".into());
+    }
+    let domain = parse_domain_arg(domain.as_deref())?;
+    let kind = parse_kind_arg(kind.as_deref())?;
+    let never: BTreeSet<AgentId> = never_share_with
+        .unwrap_or_default()
+        .iter()
+        .map(|s| parse_agent_arg(s))
+        .collect::<Result<_, _>>()?;
+
+    let mut m = state.memory.lock().map_err(|e| e.to_string())?;
+    let id = m
+        .remember(NewMemory {
+            domain,
+            kind,
+            text: trimmed.to_string(),
+            source: "user".into(),
+            confidence: 1.0,
+            never_share_with: never,
+        })
+        .map_err(|e| e.to_string())?;
+    let stored = m.get(Reader::User, id).map_err(|e| e.to_string())?;
+    Ok(memory_to_view(stored))
+}
+
+#[tauri::command]
+fn forget_memory(state: State<'_, AppState>, id: u64) -> Result<(), String> {
+    let mut m = state.memory.lock().map_err(|e| e.to_string())?;
+    m.forget(Reader::User, MemoryId(id))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn kv_get(state: State<'_, AppState>, key: String) -> Result<Option<String>, String> {
+    if key.trim().is_empty() {
+        return Err("kv key must not be empty".into());
+    }
+    let m = state.memory.lock().map_err(|e| e.to_string())?;
+    m.get_value(&key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn kv_set(state: State<'_, AppState>, key: String, value: String) -> Result<(), String> {
+    if key.trim().is_empty() {
+        return Err("kv key must not be empty".into());
+    }
+    let mut m = state.memory.lock().map_err(|e| e.to_string())?;
+    m.put(&key, &value).map_err(|e| e.to_string())
 }
 
 pub fn run() {
     tauri::Builder::default()
-        .manage(AppState::default())
+        .setup(|app| {
+            let dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("failed to locate app data directory: {e}"))?;
+            std::fs::create_dir_all(&dir)?;
+            let key = keychain::load_or_create_key()?;
+            let state = AppState::open_persistent(&dir.join("memory.sqlite"), &key)?;
+            app.manage(state);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             system_info,
             permissions,
             set_permission,
             emergency_stop,
             resume,
-            memory_summary
+            memory_summary,
+            memories_recent,
+            remember_note,
+            forget_memory,
+            kv_get,
+            kv_set
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nexonic AI");
@@ -202,5 +398,72 @@ mod tests {
         assert!(!v.stopped);
         assert!(v.items.iter().all(|i| !i.granted));
         assert_eq!(v.items.len(), Capability::ALL.len());
+    }
+
+    #[test]
+    fn persistent_state_survives_reopen_with_isolation() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "nexonic-app-mem-{}-{}.sqlite",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let key = generate_key();
+        let id = {
+            let st = AppState::open_persistent(&path, &key).unwrap();
+            assert!(st.persistent);
+            let mut m = st.memory.lock().unwrap();
+            m.put("focus", r#"[{"id":"1","text":"Review M20","done":false}]"#)
+                .unwrap();
+            m.remember(NewMemory {
+                domain: Domain::Private(AgentId::Nexa),
+                kind: Kind::Preference,
+                text: "Prefer dark workspace".into(),
+                source: "user".into(),
+                confidence: 1.0,
+                never_share_with: [AgentId::Sharee].into_iter().collect(),
+            })
+            .unwrap()
+        };
+
+        let reopened = AppState::open_persistent(&path, &key).unwrap();
+        let m = reopened.memory.lock().unwrap();
+        assert_eq!(m.context_for(Reader::User).len(), 1);
+        assert!(m.get(Reader::Agent(AgentId::Sharee), id).is_err());
+        assert!(m
+            .get_value("focus")
+            .unwrap()
+            .unwrap()
+            .contains("Review M20"));
+        drop(m);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn memory_helpers_parse_and_forget() {
+        let st = AppState::in_memory_for_tests().unwrap();
+        let mut m = st.memory.lock().unwrap();
+        let id = m
+            .remember(NewMemory {
+                domain: parse_domain_arg(Some("sharee")).unwrap(),
+                kind: parse_kind_arg(Some("semantic")).unwrap(),
+                text: "User works on Apple Silicon".into(),
+                source: "user".into(),
+                confidence: 1.0,
+                never_share_with: BTreeSet::new(),
+            })
+            .unwrap();
+        let recent: Vec<MemoryView> = m
+            .recent(Reader::User, 10)
+            .into_iter()
+            .map(memory_to_view)
+            .collect();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].domain, "sharee");
+        m.forget(Reader::User, id).unwrap();
+        assert!(m.recent(Reader::User, 10).is_empty());
     }
 }
