@@ -1,14 +1,10 @@
 # Design coverage matrix
 
-**Status: ⛔ blocked — the two reference images have not been provided yet.**
+**Status: references received 26 Nov 2026** (main dashboard + UI template sheet). They are
+kept locally in `design-references/` (ignored by Git) and are not published here. Tokens,
+components and the dashboard composition are recorded in [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md).
 
-1. Nexonic Collective Intelligence Dashboard (main dashboard composition)
-2. Nexonic Personal AI Complete UI Template Sheet (design system and screen coverage)
-
-No interface will be substituted until they are available. The references will be kept
-locally in `design-references/` (ignored by Git) unless their redistribution is confirmed.
-
-Once provided, this file will map every screen, component, interaction state and workflow
+This file maps every screen, component, interaction state and workflow
 to its implementation files, backing functionality and verification tests:
 
 | No. | Environment | Implementation | Backend | Tests | Status |

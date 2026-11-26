@@ -6,14 +6,14 @@ Status: ✅ done · 🔶 in progress · ⛔ blocked · ⬜ pending
 | | Milestone | Status |
 |---|---|---|
 | M01 | Development tooling and integrations | ✅ |
-| M02 | Research, reference analysis, repository and Stark AI audits | 🔶 reference images missing |
+| M02 | Research, reference analysis, repository and Stark AI audits | ✅ |
 | M03 | Repository initialization and security baseline | ✅ |
 | M04 | Cognitive, technical, security and commercial architecture | 🔶 |
 
 ## Phase B — Premium visual design
 | | Milestone | Status |
 |---|---|---|
-| M05 | Creative direction and design coverage matrix | ⛔ needs reference images |
+| M05 | Creative direction and design coverage matrix | 🔶 design system recorded |
 | M06 | Design system, typography, motion primitives | ⬜ |
 | M07 | Native desktop shell and navigation | ⬜ |
 | M08 | Dual and individual presence | ⬜ |
