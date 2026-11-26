@@ -1,0 +1,11 @@
+[package]
+name = "nexonic-memory-engine"
+description = "Private and collective memory domains with enforced isolation for Nexonic AI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

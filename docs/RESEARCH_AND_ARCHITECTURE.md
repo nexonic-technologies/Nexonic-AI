@@ -40,5 +40,4 @@ in `DEPENDENCY_LICENSES.md` and the file header.
 ## 4. Open questions for the owner
 
 - Project license (none chosen yet — nothing is assumed).
-- The two visual reference images (dashboard and UI template sheet) are required for M05+.
 - Apple Developer ID certificate and notarization credentials, when distribution starts.

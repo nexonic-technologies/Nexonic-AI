@@ -49,6 +49,7 @@ cargo test --workspace
 - [Implementation status](docs/IMPLEMENTATION_STATUS.md)
 - [Milestones](docs/MILESTONES.md)
 - [Research and architecture](docs/RESEARCH_AND_ARCHITECTURE.md)
+- [Design system](docs/DESIGN_SYSTEM.md)
 - [Design coverage matrix](docs/DESIGN_COVERAGE_MATRIX.md)
 - [Known limitations](docs/KNOWN_LIMITATIONS.md)
 - [Security policy](SECURITY.md)
