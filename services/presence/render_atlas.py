@@ -26,8 +26,8 @@ PORTRAITS = REPO / "apps" / "desktop" / "src" / "assets" / "characters"
 # Head-pose grid for cursor following (degrees). The eyes lead the head.
 YAWS = (-14, -7, 0, 7, 14)
 PITCHES = (-8, 0, 8)
-# Expression frames are rendered at three head turns so moods can still look around.
-EXPR_YAWS = (-8, 0, 8)
+# Expressions share the head-turn grid so Sharee and Nexa can smile at each other.
+EXPR_YAWS = YAWS
 # Blinks use LivePortrait's eye-retargeting network (target eye-open ratio).
 EYE_RATIO = {"h": 0.17, "c": 0.0}
 
