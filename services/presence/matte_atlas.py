@@ -3,7 +3,9 @@
 Runs BiRefNet (MIT, ZhengPeng7/BiRefNet-portrait) on the Apple Silicon GPU
 (MPS) and rewrites each frame as a WebP with an alpha channel, so the
 characters float on the presence stage instead of sitting in a dark box.
-Every frame gets its own matte, so the cut-out follows each head turn.
+Each head pose and expression gets its own matte, so the cut-out follows every
+head turn; the half-closed and closed-lid frames reuse the matte of their
+open-eye frame (blinks do not change the silhouette).
 
 Usage: python matte_atlas.py --atlas /tmp/atlas [--revision <sha>]
 """
@@ -43,8 +45,10 @@ def main() -> int:
     std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
     frames = sorted(Path(args.atlas).glob("*/*.webp"))
+    open_frames = [f for f in frames if f.stem.endswith("_o")]
+    print(f"[matte] {len(open_frames)} poses to matte on {device}", flush=True)
     t0 = time.time()
-    for f in frames:
+    for n, f in enumerate(open_frames, 1):
         img = Image.open(f).convert("RGB")
         x = torch.from_numpy(np.asarray(img.resize((args.size, args.size), Image.BICUBIC), dtype=np.float32) / 255.0)
         x = ((x.permute(2, 0, 1)[None] - mean) / std).to(device, dtype)
@@ -53,9 +57,14 @@ def main() -> int:
         alpha = Image.fromarray((pred * 255).clip(0, 255).astype(np.uint8)).resize(img.size, Image.BICUBIC)
         # soften the very edge a touch so hair blends into the stage glow
         alpha = alpha.filter(ImageFilter.GaussianBlur(0.6))
-        rgba = img.copy()
-        rgba.putalpha(alpha)
-        rgba.save(f, quality=args.quality, alpha_quality=90, method=6)
+        for variant in (f, f.with_name(f.stem[:-2] + "_h.webp"), f.with_name(f.stem[:-2] + "_c.webp")):
+            if not variant.exists():
+                continue
+            rgba = Image.open(variant).convert("RGB") if variant != f else img.copy()
+            rgba.putalpha(alpha)
+            rgba.save(variant, quality=args.quality, alpha_quality=90, method=6)
+        if n % 5 == 0:
+            print(f"[matte] {n}/{len(open_frames)} ({time.time() - t0:.0f}s)", flush=True)
     print(f"[matte] {len(frames)} frames in {time.time() - t0:.1f}s on {device}", flush=True)
     return 0
 
