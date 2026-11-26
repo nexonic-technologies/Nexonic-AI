@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "about": "Facial controls for the live-portrait atlas, taken from the Sharee and Nexa expression datasheets (FACS action units in comments).",
+  "gazeGain": 0.9,
+  "expressions": {
+    "friendly": { "smile": 0.45, "brow": 2, "_facs": "AU6 AU12 (micro smile)" },
+    "happy": { "smile": 1.0, "eyes": -3, "brow": 2, "_facs": "AU6 AU12" },
+    "attentive": { "eyes": 4, "brow": 4, "pitch": 2, "_facs": "AU1 AU2 AU5 (listening)" },
+    "curious": { "brow": 10, "eyes": 3, "roll": 5, "smile": 0.15, "_facs": "AU1 AU2 AU25 + head tilt" },
+    "thinking": { "brow": -5, "pupil_y": 7, "pupil_x": -5, "pitch": -3, "smile": -0.1, "_facs": "AU4 AU7 AU17 + gaze up" },
+    "concerned": { "brow": -8, "smile": -0.25, "eyes": 2, "_facs": "AU1 AU4 AU15" },
+    "confident": { "smile": 0.35, "pitch": -4, "eyes": -2, "_facs": "AU12 AU17 + chin up" },
+    "calm": { "smile": 0.25, "eyes": -6, "_facs": "AU12 soft + relaxed lids" },
+    "determined": { "brow": -6, "eyes": -3, "smile": -0.1, "_facs": "AU4 AU7 AU23" }
+  },
+  "personas": {
+    "sharee": {
+      "headRange": 0.85,
+      "intensity": { "happy": 0.85, "friendly": 0.9, "curious": 0.85, "concerned": 0.9, "calm": 1.0, "confident": 1.0 }
+    },
+    "nexa": {
+      "headRange": 1.0,
+      "intensity": { "happy": 1.0, "friendly": 1.05, "curious": 1.0, "concerned": 0.95, "calm": 1.0, "confident": 1.0 }
+    }
+  }
+}
