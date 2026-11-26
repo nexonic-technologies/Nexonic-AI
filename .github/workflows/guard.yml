@@ -1,0 +1,64 @@
+name: Guard
+
+# Owner-only authorship, attribution and secret checks on every push and PR.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  owner:
+    name: Owner-only commits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Check commit authors and messages
+        env:
+          EVENT: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            scripts/owner-policy.sh range "$PR_BASE" "$PR_HEAD"
+          else
+            scripts/owner-policy.sh range "$PUSH_BEFORE" "$PUSH_AFTER"
+          fi
+
+  secrets:
+    name: Secret scan (full history)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks 8.30.1 (checksum verified)
+        run: |
+          v=8.30.1
+          f=gitleaks_${v}_linux_x64.tar.gz
+          curl -sSfL -o "$f" "https://github.com/gitleaks/gitleaks/releases/download/v${v}/${f}"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $f" | sha256sum -c -
+          tar -xzf "$f" gitleaks
+      - name: Scan
+        run: ./gitleaks detect --source . --config .gitleaks.toml --redact --no-banner --exit-code 1
+
+  private-files:
+    name: No private files tracked
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check tracked paths
+        run: |
+          bad="$(git ls-files | grep -E '(^|/)(\.env(\..*)?|.*\.(pem|p12|p8|key|mobileprovision|sqlite|db)|CLAUDE\.md|\.claude/.*)$' | grep -vE '\.env\.example$' || true)"
+          if [ -n "$bad" ]; then echo "Private files tracked:"; echo "$bad"; exit 1; fi
+          echo "No private files tracked."

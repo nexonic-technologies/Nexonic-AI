@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Blocks commits from any identity other than the owner, and staged secrets.
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+"$root/scripts/owner-policy.sh" identity
+
+# Files that must never be committed.
+blocked="$(git diff --cached --name-only --diff-filter=ACMR | grep -E '(^|/)(\.env(\..*)?|.*\.(pem|p12|p8|key|mobileprovision|sqlite|db)|CLAUDE\.md|\.claude/.*)$' | grep -vE '\.env\.example$' || true)"
+if [ -n "$blocked" ]; then
+  echo "pre-commit: refusing to commit private files:" >&2; echo "$blocked" >&2; exit 1
+fi
+
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact --no-banner --config "$root/.gitleaks.toml"
+else
+  echo "pre-commit: gitleaks not installed; CI will still scan (brew install gitleaks)." >&2
+fi

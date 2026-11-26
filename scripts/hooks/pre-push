@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Checks every commit being pushed, and that the push goes to the official repo.
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+url="$2"
+case "$url" in
+  *github.com[:/]nexonic-technologies/[Nn]exonic-[Aa][Ii]|*github.com[:/]nexonic-technologies/[Nn]exonic-[Aa][Ii].git) ;;
+  *) echo "pre-push: remote '$url' is not nexonic-technologies/Nexonic-AI" >&2; exit 1 ;;
+esac
+zero=0000000000000000000000000000000000000000
+while read -r _lref lsha _rref rsha; do
+  [ "$lsha" = "$zero" ] && continue
+  "$root/scripts/owner-policy.sh" range "$rsha" "$lsha"
+done

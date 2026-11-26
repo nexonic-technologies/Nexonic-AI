@@ -1,0 +1,42 @@
+# Build output
+/target/
+**/target/
+node_modules/
+dist/
+*.dmg
+*.app/
+
+# Secrets and credentials — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.p8
+*.key
+*.mobileprovision
+
+# Personal data — memories, conversations, recordings, adapters, databases
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+/data/
+/user-data/
+/recordings/
+/adapters/
+/models/
+
+# Local design references (redistribution rights not verified)
+/design-references/
+
+# Local assistant/tool configuration and working notes (kept out of the repo)
+CLAUDE.md
+.claude/
+AGENTS.md
+.cursor/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
