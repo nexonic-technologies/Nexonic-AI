@@ -21,6 +21,7 @@ Classification: **Implemented** · **Tested** · **Experimental** · **Blocked**
 | Encrypted persistent memory (SQLite + XChaCha20-Poly1305, Keychain key) | Tested | `apps/desktop/src-tauri/src/lib.rs` + `keychain.rs` + `crates/memory-engine/src/persist.rs` |
 | Typography system + motion typography | Implemented | Sora / Geist / Geist Mono, `MotionText.tsx` |
 | Talking Sharee/Nexa (on-device: Kokoro → JoyVASA → LivePortrait MLX → MuseTalk 1.5 MLX) | Experimental | `services/presence`, `Presence probe` workflow; persona/expression specs in `personas.json` |
+| Audit fixes (26 Nov) | Tested | owner-policy handles rewritten branches; graceful encrypted-storage fallback; update check async, semver, opt-in; waveform moves only for real audio; Today's Focus save race fixed; 1280×800 Awareness panel fit |
 | Agents, collaboration feed, memory events, voice | Pending | panels show honest empty states until M16/M17/M28 |
 | Character art | Interim | owner concept art; real-time digital humans in M15 |
 | Agents, model routing, voice, awareness, automation | Pending | Phases C–E |

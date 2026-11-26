@@ -11,6 +11,7 @@ const SERVICE: &str = "com.nexonictechnologies.ai";
 #[cfg(target_os = "macos")]
 const ACCOUNT: &str = "memory-db-key";
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn encode_hex(key: &[u8; 32]) -> Zeroizing<String> {
     let mut s = Zeroizing::new(String::with_capacity(64));
     for b in key {
@@ -20,6 +21,7 @@ pub fn encode_hex(key: &[u8; 32]) -> Zeroizing<String> {
     s
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn decode_hex(raw: &[u8]) -> Result<Zeroizing<[u8; 32]>, String> {
     let trimmed = std::str::from_utf8(raw)
         .map_err(|_| "Keychain memory key is not valid UTF-8".to_string())?
@@ -40,6 +42,7 @@ pub fn decode_hex(raw: &[u8]) -> Result<Zeroizing<[u8; 32]>, String> {
     Ok(out)
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn hex_nibble(b: u8) -> Result<u8, String> {
     match b {
         b'0'..=b'9' => Ok(b - b'0'),

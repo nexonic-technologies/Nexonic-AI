@@ -91,7 +91,7 @@ export function App() {
   const [exprIndex, setExprIndex] = useState<{ Sharee: number; Nexa: number }>({ Sharee: 0, Nexa: 0 });
   const [palette, setPalette] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
-  const [autoUpdate, setAutoUpdate] = usePersisted<boolean>("auto-update", true);
+  const [autoUpdate, setAutoUpdate] = usePersisted<boolean>("auto-update", false);
   const [updateInfo, setUpdateInfo] = useState<UpdateStatus | null>(null);
   const [sys, setSys] = useState<SystemInfo | null>(null);
   const [perms, setPerms] = useState<PermissionsView | null>(null);
@@ -104,7 +104,9 @@ export function App() {
         n.id === "Memory"
           ? {
               ...n,
-              status: memoryInfo?.persistent
+              status: memoryInfo?.storage_error
+                ? "Temporary store · encrypted storage unavailable (see Memory panel)"
+                : memoryInfo?.persistent
                 ? "Isolation active · encrypted SQLite (Keychain)"
                 : inDesktop()
                   ? "Isolation active · encrypted SQLite"
@@ -446,9 +448,10 @@ function Presence({
 }) {
   const src = PORTRAITS[name][expression.key];
   const previewing = expression.key !== "neutral";
-  const liveMotion = active || previewing || state === "speaking" || state === "listening";
+  // The waveform only moves for real audio; hover and expression previews never fake it.
+  const liveMotion = state === "speaking" || state === "listening";
   const statusTag = state === "offline"
-    ? (previewing ? expression.label.toUpperCase() : "PREVIEW")
+    ? (previewing ? expression.label.toUpperCase() : "NO MODEL")
     : "LIVE";
   const stageRef = useRef<HTMLButtonElement>(null);
 
@@ -499,7 +502,7 @@ function Presence({
       <div className="who">
         <SplitText as="h2" className="agent-name" text={name.toUpperCase()} delay={side === "left" ? 620 : 720} stagger={55} />
         <p className="agent-status">
-          <span className={`dot ${state === "offline" ? (liveMotion ? "preview" : "off") : "on"}`} />
+          <span className={`dot ${state === "offline" ? (active || previewing ? "preview" : "off") : "on"}`} />
           <RollText value={state === "offline" ? "Standby" : presenceLabel[state]} />
           <i>·</i>
           <ScrambleText text={statusTag} delay={400} className="mono" />
@@ -528,6 +531,9 @@ function Panel({ icon, title, meta, children }: { icon: IconName; title: string;
 function FocusPanel() {
   const [browserTasks, setBrowserTasks] = usePersisted<Task[]>("focus", []);
   const [desktopTasks, setDesktopTasks] = useState<Task[]>([]);
+  // Edits are held back until the stored list has loaded, so a fast first
+  // edit can never be overwritten by (or overwrite) the saved focus list.
+  const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState("");
   const desktop = inDesktop();
   const tasks = desktop ? desktopTasks : browserTasks;
@@ -537,6 +543,7 @@ function FocusPanel() {
     let active = true;
     void ipc.kvGet("focus").then((raw) => {
       if (!active) return;
+      setLoaded(true);
       if (raw) {
         try {
           const parsed = JSON.parse(raw) as Task[];
@@ -571,12 +578,20 @@ function FocusPanel() {
       setBrowserTasks(updater);
       return;
     }
-    setDesktopTasks((prev) => {
-      const next = updater(prev);
-      void ipc.kvSet("focus", JSON.stringify(next));
-      return next;
-    });
+    if (!loaded) return;
+    setDesktopTasks(updater);
   };
+
+  // Persist after React commits the change (side effects stay out of updaters).
+  const saved = useRef<string | null>(null);
+  useEffect(() => {
+    if (!desktop || !loaded) return;
+    const json = JSON.stringify(desktopTasks);
+    if (saved.current === null) { saved.current = json; return; }
+    if (json === saved.current) return;
+    saved.current = json;
+    void ipc.kvSet("focus", json);
+  }, [desktop, loaded, desktopTasks]);
 
   const done = tasks.filter((t) => t.done).length;
   const add = () => {
@@ -646,7 +661,7 @@ function MemoryPanel({
         </ul>
       ) : (
         <div className="empty-state">
-          <p>{count === null ? "Memory engine not reachable in this preview." : info?.persistent ? "No memories yet · encrypted SQLite active." : "No memories yet."}</p>
+          <p>{count === null ? "Memory engine not reachable in this preview." : info?.storage_error ? "Encrypted storage could not open, so nothing is saved after you quit. Your existing data was not touched." : info?.persistent ? "No memories yet · encrypted SQLite active." : "No memories yet."}</p>
           <small>Private memories for Sharee and Nexa stay separate from shared memory. You can review, correct or delete anything.</small>
         </div>
       )}

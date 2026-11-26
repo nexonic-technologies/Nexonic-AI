@@ -22,6 +22,8 @@ export interface MemorySummary {
   userVisible: number;
   encrypted: boolean;
   persistent: boolean;
+  /** Why the encrypted on-disk store could not open (app then runs on a temporary store). */
+  storage_error?: string | null;
 }
 
 export interface MemoryView {
