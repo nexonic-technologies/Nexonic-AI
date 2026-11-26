@@ -6,6 +6,7 @@ name: Presence atlas
 on:
   workflow_dispatch:
   push:
+    branches-ignore: ["main"]
     paths: ["services/presence/render_atlas.py", "services/presence/matte_atlas.py", "services/presence/atlas_spec.json", ".github/workflows/atlas.yml"]
 
 permissions:

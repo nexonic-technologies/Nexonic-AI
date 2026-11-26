@@ -294,12 +294,12 @@ export function App() {
                   const y = Math.min(94, Math.max(6, ((e.clientY - core.top) / core.height) * 100));
                   setNodePos((p) => ({ ...p, [n.id]: { x, y } }));
                 }}
-                onPointerUp={() => {
+                onPointerUp={(e) => {
                   const d = nodeDrag.current;
                   nodeDrag.current = null;
-                  if (d && !d.moved) setNode(n.id);
+                  if (d && !d.moved && e.detail < 2) setNode(n.id);
                 }}
-                onDoubleClick={() => setNodePos((p) => { const q = { ...p }; delete q[n.id]; return q; })}
+                onDoubleClick={() => { setNode(null); setNodePos((p) => { const q = { ...p }; delete q[n.id]; return q; }); }}
                 onPointerEnter={() => setHoverNode(n.id)} onPointerLeave={() => setHoverNode(null)} onFocus={() => setHoverNode(n.id)} onBlur={() => setHoverNode(null)}>
                 <Icon name={n.icon} size={15} /><span>{n.id}</span>
               </button>
@@ -555,7 +555,7 @@ function Presence({
         <span className="holo-spot" aria-hidden="true" />
         <span className="holo-ring" aria-hidden="true" />
         {video ? (
-          <VideoFace clips={video.clips} face={video.face} want={clip} reduced={reduced} label={`${name} portrait`} />
+          <VideoFace clips={video.clips} face={video.face} fallback={FALLBACK[name]} want={clip} reduced={reduced} label={`${name} portrait`} />
         ) : (
         <LiveFace
           atlas={ATLAS[name]}

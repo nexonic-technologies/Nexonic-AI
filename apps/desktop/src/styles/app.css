@@ -196,14 +196,14 @@ button:disabled { cursor: default; }
 }
 @keyframes expr-pop { from { opacity: 0.5; transform: scale(0.97) translateY(4px); } }
 .portrait.live {
-  width: 100%; height: 100%; max-width: none; max-height: none; animation: none;
+  position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; animation: none;
   /* cut-out character (edges dissolved in LiveFace) with a rim light in the agent's colour */
   filter: drop-shadow(0 0 1px rgb(var(--rgb) / 0.55)) drop-shadow(0 0 22px rgb(var(--rgb) / 0.22));
   transition: filter 400ms var(--ease-out);
 }
 .presence.is-active .portrait.live { filter: drop-shadow(0 0 1.5px rgb(var(--rgb) / 0.8)) drop-shadow(0 0 30px rgb(var(--rgb) / 0.36)); }
 .presence.is-live.is-active .portrait { transform: none; }
-.presence.is-live .portrait-stage { overflow: visible; }
+.presence.is-live .portrait-stage { overflow: hidden; }
 .presence.is-live .holo-spot { inset: -8% -10%; background: radial-gradient(46% 52% at var(--hpx) var(--hpy), rgb(var(--rgb) / 0.2), transparent 70%); }
 .presence.is-active .portrait {
   filter: contrast(1.08) saturate(1.1) brightness(1.03) drop-shadow(0 22px 34px rgb(var(--rgb) / 0.28));

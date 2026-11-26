@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * Real video presence for Sharee and Nexa.
@@ -39,6 +39,7 @@ void main(){
 export function VideoFace({
   clips,
   face,
+  fallback,
   want,
   onDone,
   reduced,
@@ -46,6 +47,7 @@ export function VideoFace({
 }: {
   clips: ClipSet;
   face?: FaceBox;
+  fallback?: string;
   /** Clip the behaviour engine wants now; one-shot clips play to the end once. */
   want: ClipName;
   onDone?: (clip: ClipName) => void;
@@ -53,6 +55,7 @@ export function VideoFace({
   label: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [webglFailed, setWebglFailed] = useState(false);
   const wantRef = useRef(want);
   wantRef.current = want;
   const doneRef = useRef(onDone);
@@ -62,7 +65,10 @@ export function VideoFace({
     const canvas = canvasRef.current;
     if (!canvas || !clips.idle) return;
     const gl = canvas.getContext("webgl", { premultipliedAlpha: true, alpha: true });
-    if (!gl) return;
+    if (!gl) {
+      setWebglFailed(true);
+      return;
+    }
 
     const mk = (type: number, src: string) => {
       const s = gl.createShader(type)!;
@@ -70,9 +76,11 @@ export function VideoFace({
       gl.compileShader(s);
       return s;
     };
+    const vs = mk(gl.VERTEX_SHADER, VERT);
+    const fs = mk(gl.FRAGMENT_SHADER, FRAG);
     const prog = gl.createProgram()!;
-    gl.attachShader(prog, mk(gl.VERTEX_SHADER, VERT));
-    gl.attachShader(prog, mk(gl.FRAGMENT_SHADER, FRAG));
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
     gl.linkProgram(prog);
     gl.useProgram(prog);
     const buf = gl.createBuffer();
@@ -109,7 +117,12 @@ export function VideoFace({
     let fadeStart = 0;
     let lastWant: ClipName = "idle";
     const idle = players.get("idle")!;
-    if (!reduced) void idle.v.play().catch(() => undefined);
+    if (reduced) {
+      // Seek slightly into the clip so a resting frame decodes without looping playback.
+      idle.v.addEventListener("loadedmetadata", () => { idle.v.currentTime = 0.04; }, { once: true });
+    } else {
+      void idle.v.play().catch(() => undefined);
+    }
 
     const start = (name: ClipName) => {
       const p = players.get(name);
@@ -128,14 +141,23 @@ export function VideoFace({
     };
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const fit = () => {
+    let fitRaf = 0;
+    const syncSize = () => {
       const r = canvas.getBoundingClientRect();
-      canvas.width = Math.max(1, Math.round(r.width * dpr));
-      canvas.height = Math.max(1, Math.round(r.height * dpr));
+      const nw = Math.max(1, Math.round(r.width * dpr));
+      const nh = Math.max(1, Math.round(r.height * dpr));
+      if (canvas.width !== nw || canvas.height !== nh) {
+        canvas.width = nw;
+        canvas.height = nh;
+      }
     };
-    const ro = new ResizeObserver(fit);
+    const scheduleFit = () => {
+      if (fitRaf) return;
+      fitRaf = requestAnimationFrame(() => { fitRaf = 0; syncSize(); });
+    };
+    const ro = new ResizeObserver(scheduleFit);
     ro.observe(canvas);
-    fit();
+    syncSize();
 
     const draw = (p: { v: HTMLVideoElement; t: WebGLTexture }, a: number) => {
       const v = p.v;
@@ -151,10 +173,18 @@ export function VideoFace({
       let x: number;
       let y: number;
       if (face) {
-        w = (FACE_W * cw) / face.w;
+        // Keep the head consistent horizontally while scaling down on compact screens
+        // so the shoulders and chin always stay cleanly above the nameplate.
+        w = Math.min((FACE_W * cw) / face.w, (0.52 * ch) / face.w);
         h = (w * ih) / iw;
+        const maxH = ch * 1.12;
+        if (h > maxH) {
+          h = maxH;
+          w = (h * iw) / ih;
+        }
         x = cw * FACE_X - face.cx * w;
-        y = ch * FACE_Y - face.cy * h;
+        y = Math.min(cw * 0 + ch * FACE_Y - face.cy * h, ch - h * 0.92);
+        y = Math.max(y, -h * 0.04);
       } else {
         const s = Math.min(cw / iw, ch / ih);
         w = iw * s;
@@ -171,6 +201,7 @@ export function VideoFace({
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
       if (document.visibilityState !== "visible") return;
+      syncSize();
       const w = wantRef.current;
       if (w !== lastWant) {
         lastWant = w;
@@ -198,14 +229,21 @@ export function VideoFace({
 
     return () => {
       cancelAnimationFrame(raf);
+      if (fitRaf) cancelAnimationFrame(fitRaf);
       ro.disconnect();
-      for (const { v } of players.values()) {
+      for (const { v, t } of players.values()) {
         v.pause();
         v.removeAttribute("src");
         v.load();
+        gl.deleteTexture(t);
       }
+      gl.deleteBuffer(buf);
+      gl.deleteProgram(prog);
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
     };
   }, [clips, face, reduced]);
 
+  if (webglFailed && fallback) return <img className="portrait" src={fallback} alt={label} draggable={false} />;
   return <canvas ref={canvasRef} className="portrait live" role="img" aria-label={label} />;
 }
