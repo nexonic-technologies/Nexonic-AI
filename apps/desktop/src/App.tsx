@@ -3,14 +3,48 @@ import { presenceLabel, type MotionLevel, type PresenceState, type Theme } from 
 import { Icon, type IconName } from "./components/Icon";
 import { NeuralCore } from "./components/NeuralCore";
 import { CountUp, RollText, ScrambleText, SplitText, useCycle } from "./components/MotionText";
-import { capabilityLabel, formatBytes, inDesktop, ipc, type Capability, type MemorySummary, type MemoryView, type PermissionsView, type SystemInfo } from "./lib/ipc";
+import { capabilityLabel, formatBytes, inDesktop, ipc, type Capability, type MemorySummary, type MemoryView, type PermissionsView, type SystemInfo, type UpdateStatus } from "./lib/ipc";
 import { usePersisted, useReducedMotion } from "./lib/store";
-import shareeImg from "./assets/characters/sharee.webp";
-import nexaImg from "./assets/characters/nexa.webp";
+import shareeNeutral from "./assets/characters/sharee.webp";
+import shareeHappy from "./assets/characters/sharee-happy.webp";
+import shareeCurious from "./assets/characters/sharee-curious.webp";
+import shareeDetermined from "./assets/characters/sharee-determined.webp";
+import shareeCalm from "./assets/characters/sharee-calm.webp";
+import nexaNeutral from "./assets/characters/nexa.webp";
+import nexaHappy from "./assets/characters/nexa-happy.webp";
+import nexaCurious from "./assets/characters/nexa-curious.webp";
+import nexaDetermined from "./assets/characters/nexa-determined.webp";
+import nexaCalm from "./assets/characters/nexa-calm.webp";
 
 type Section = "presence" | "hub" | "memory" | "evolution" | "activity" | "computer" | "intelligence" | "settings";
 type Mode = "world" | "collaborate" | "analyze" | "create" | "automate";
 type Node = "Reasoning" | "Memory" | "Learning" | "Perception" | "Planning" | "Action";
+type ExpressionKey = "neutral" | "happy" | "curious" | "determined" | "calm";
+
+const EXPRESSIONS: { key: ExpressionKey; label: string }[] = [
+  { key: "neutral", label: "Neutral" },
+  { key: "happy", label: "Happy" },
+  { key: "curious", label: "Curious" },
+  { key: "determined", label: "Focused" },
+  { key: "calm", label: "Calm" },
+];
+
+const PORTRAITS: Record<"Sharee" | "Nexa", Record<ExpressionKey, string>> = {
+  Sharee: {
+    neutral: shareeNeutral,
+    happy: shareeHappy,
+    curious: shareeCurious,
+    determined: shareeDetermined,
+    calm: shareeCalm,
+  },
+  Nexa: {
+    neutral: nexaNeutral,
+    happy: nexaHappy,
+    curious: nexaCurious,
+    determined: nexaDetermined,
+    calm: nexaCalm,
+  },
+};
 
 const NAV: { id: Section; icon: IconName; title: string; sub: string }[] = [
   { id: "presence", icon: "presence", title: "Presence", sub: "Sharee, Nexa & You" },
@@ -32,13 +66,13 @@ const MODES: { id: Mode; icon: IconName; label: string; panels: PanelId[] }[] = 
 ];
 type PanelId = "focus" | "collab" | "memory" | "awareness";
 
-const NODES: { id: Node; icon: IconName; pos: string; owner: string; status: string }[] = [
-  { id: "Reasoning", icon: "spark", pos: "n-tl", owner: "Agent runtime (M16)", status: "Waiting for a model provider" },
-  { id: "Perception", icon: "camera", pos: "n-tr", owner: "Awareness (M24–M27)", status: "Camera, microphone and screen are off" },
-  { id: "Memory", icon: "memory", pos: "n-ml", owner: "Memory engine (M20)", status: "Isolation active · in-memory store" },
-  { id: "Planning", icon: "target", pos: "n-mr", owner: "Agent runtime (M16)", status: "Waiting for a model provider" },
-  { id: "Learning", icon: "evolution", pos: "n-bl", owner: "Learning (M36–M39)", status: "Not started" },
-  { id: "Action", icon: "play", pos: "n-br", owner: "Computer control (M32)", status: "Automation permission is off" },
+const NODES: { id: Node; icon: IconName; pos: string; owner: string; status: string; path: string; pin: [number, number]; hub: [number, number] }[] = [
+  { id: "Reasoning", icon: "spark", pos: "n-tl", owner: "Agent runtime (M16)", status: "Waiting for a model provider", path: "M 134 56 H 196 L 236 118", pin: [134, 56], hub: [236, 118] },
+  { id: "Perception", icon: "camera", pos: "n-tr", owner: "Awareness (M24–M27)", status: "Camera, microphone and screen are off", path: "M 466 56 H 404 L 364 118", pin: [466, 56], hub: [364, 118] },
+  { id: "Memory", icon: "memory", pos: "n-ml", owner: "Memory engine (M20)", status: "Isolation active · in-memory store", path: "M 122 200 H 194", pin: [122, 200], hub: [194, 200] },
+  { id: "Planning", icon: "target", pos: "n-mr", owner: "Agent runtime (M16)", status: "Waiting for a model provider", path: "M 478 200 H 406", pin: [478, 200], hub: [406, 200] },
+  { id: "Learning", icon: "evolution", pos: "n-bl", owner: "Learning (M36–M39)", status: "Not started", path: "M 134 344 H 196 L 236 282", pin: [134, 344], hub: [236, 282] },
+  { id: "Action", icon: "play", pos: "n-br", owner: "Computer control (M32)", status: "Automation permission is off", path: "M 466 344 H 404 L 364 282", pin: [466, 344], hub: [364, 282] },
 ];
 
 interface Task { id: string; text: string; done: boolean }
@@ -51,7 +85,14 @@ export function App() {
   const [mode, setMode] = usePersisted<Mode>("mode", "world");
   const [node, setNode] = useState<Node | null>(null);
   const [hoverNode, setHoverNode] = useState<Node | null>(null);
+  const [hoverAgent, setHoverAgent] = useState<"Sharee" | "Nexa" | null>(null);
+  const [coreHover, setCoreHover] = useState(false);
+  const [corePulse, setCorePulse] = useState(0);
+  const [exprIndex, setExprIndex] = useState<{ Sharee: number; Nexa: number }>({ Sharee: 0, Nexa: 0 });
   const [palette, setPalette] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [autoUpdate, setAutoUpdate] = usePersisted<boolean>("auto-update", true);
+  const [updateInfo, setUpdateInfo] = useState<UpdateStatus | null>(null);
   const [sys, setSys] = useState<SystemInfo | null>(null);
   const [perms, setPerms] = useState<PermissionsView | null>(null);
   const [memoryInfo, setMemoryInfo] = useState<MemorySummary | null>(null);
@@ -98,9 +139,18 @@ export function App() {
     });
   }, []);
   useEffect(() => {
+    if (!autoUpdate || !inDesktop()) return;
+    void ipc.checkUpdates().then((u) => { if (u) setUpdateInfo(u); });
+  }, [autoUpdate]);
+  useEffect(() => {
+    if (!corePulse) return;
+    const t = setTimeout(() => setCorePulse(0), 1400);
+    return () => clearTimeout(t);
+  }, [corePulse]);
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); }
-      if (e.key === "Escape") { setPalette(false); setNode(null); }
+      if (e.key === "Escape") { setPalette(false); setNode(null); setAboutOpen(false); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -109,41 +159,87 @@ export function App() {
   // Agents have no model provider yet (M17), so both are honestly offline.
   const agentState: PresenceState = "offline";
   const activeMode = MODES.find((m) => m.id === mode) ?? MODES[0]!;
+  const coreFocus = hoverNode ?? node ?? hoverAgent;
+  const interactiveActivity = Math.max(corePulse, coreHover ? 0.55 : 0, hoverAgent ? 0.42 : 0, hoverNode ? 0.35 : 0);
+
+  const cycleExpression = (who: "Sharee" | "Nexa") => {
+    setExprIndex((cur) => ({ ...cur, [who]: (cur[who] + 1) % EXPRESSIONS.length }));
+    setCorePulse(0.85);
+  };
 
   return (
     <div className="app" data-mode={mode}>
       <div className="titlebar" data-tauri-drag-region />
-      <Header onSearch={() => setPalette(true)} theme={theme} onTheme={() => setTheme(theme === "dark" ? "light" : "dark")} />
-      <Sidebar section={section} onSection={setSection} sys={sys} />
+      <Header
+        onSearch={() => setPalette(true)}
+        onAbout={() => setAboutOpen(true)}
+        updateAvailable={Boolean(updateInfo?.updateAvailable)}
+        theme={theme}
+        onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+      />
+      <Sidebar section={section} onSection={(s) => { setSection(s); if (s === "settings") setAboutOpen(true); }} sys={sys} />
       <main className="main">
         <section className="stage" aria-label="Presence" data-theme="dark">
-          <Presence name="Sharee" side="left" state={agentState} />
-          <div className="core">
-            <NeuralCore motion={motion} reduced={reduced} activity={0} focus={hoverNode ?? node} />
-            <svg className="links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-              <path d="M22 13 H30 L38 22" /><path d="M78 13 H70 L62 22" />
-              <path d="M16 36 H26 L33 42" /><path d="M84 36 H74 L67 42" />
-              <path d="M18 72 H28 L35 64" /><path d="M82 72 H72 L65 64" />
+          <Presence
+            name="Sharee"
+            side="left"
+            state={agentState}
+            expression={EXPRESSIONS[exprIndex.Sharee]!}
+            active={hoverAgent === "Sharee"}
+            onHover={(on) => setHoverAgent(on ? "Sharee" : null)}
+            onCycle={() => cycleExpression("Sharee")}
+          />
+          <div className="core" data-active={interactiveActivity > 0}>
+            <NeuralCore motion={motion} reduced={reduced} activity={interactiveActivity} focus={coreFocus} />
+            <svg className="links" viewBox="0 0 600 400" preserveAspectRatio="none" aria-hidden="true">
+              <circle className="hud-ring" cx="300" cy="200" r="108" />
+              {nodes.map((n) => {
+                const active = hoverNode === n.id || node === n.id;
+                const sideClass = n.pos.endsWith("l") ? "left" : "right";
+                return (
+                  <g key={n.id} className={`trace ${sideClass} ${active ? "active" : ""}`}>
+                    <path className="trace-base" d={n.path} />
+                    <path className="trace-pulse" d={n.path} />
+                    <circle className="trace-dot" cx={n.pin[0]} cy={n.pin[1]} r="3" />
+                    <circle className="trace-dot" cx={n.hub[0]} cy={n.hub[1]} r="3.5" />
+                  </g>
+                );
+              })}
             </svg>
-            <div className="core-label">
-              <Icon name="wave" size={26} />
+            <button
+              type="button"
+              className="core-label"
+              aria-label="Collective Intelligence Core (click to pulse)"
+              onPointerEnter={() => setCoreHover(true)}
+              onPointerLeave={() => setCoreHover(false)}
+              onClick={() => setCorePulse(0.95)}
+            >
+              <Icon name="wave" size={24} />
               <strong><SplitText text="COLLECTIVE" delay={300} stagger={30} /><SplitText text="INTELLIGENCE" delay={420} stagger={30} /></strong>
-              <span><ScrambleText text="SHAREE" delay={700} className="c-sharee" /> × <ScrambleText text="NEXA" delay={760} /></span>
+              <span><ScrambleText text="SHAREE" delay={700} className="c-sharee" /> × <ScrambleText text="NEXA" delay={760} className="c-nexa" /></span>
               <b className="inf">∞</b>
-              <em><RollText value="IDLE" /></em>
-            </div>
-            {NODES.map((n) => (
-              <button key={n.id} className={`node ${n.pos}`} onClick={() => setNode(n.id)} aria-pressed={node === n.id}
+              <em><RollText value={interactiveActivity > 0 ? "PREVIEW" : "IDLE"} /></em>
+            </button>
+            {nodes.map((n) => (
+              <button key={n.id} className={`node ${n.pos}`} data-spot onClick={() => setNode(n.id)} aria-pressed={node === n.id}
                 onPointerEnter={() => setHoverNode(n.id)} onPointerLeave={() => setHoverNode(null)} onFocus={() => setHoverNode(n.id)} onBlur={() => setHoverNode(null)}>
-                <Icon name={n.icon} size={16} />{n.id}
+                <Icon name={n.icon} size={15} /><span>{n.id}</span>
               </button>
             ))}
           </div>
-          <Presence name="Nexa" side="right" state={agentState} />
+          <Presence
+            name="Nexa"
+            side="right"
+            state={agentState}
+            expression={EXPRESSIONS[exprIndex.Nexa]!}
+            active={hoverAgent === "Nexa"}
+            onHover={(on) => setHoverAgent(on ? "Nexa" : null)}
+            onCycle={() => cycleExpression("Nexa")}
+          />
           <nav className="modes" aria-label="Workspace mode" ref={modesRef}>
             <span className="mode-ink" aria-hidden="true" />
             {MODES.map((m) => (
-              <button key={m.id} className="mode" aria-pressed={m.id === mode} onClick={() => setMode(m.id)}>
+              <button key={m.id} className="mode" data-spot aria-pressed={m.id === mode} onClick={() => setMode(m.id)}>
                 <Icon name={m.icon} size={16} />{m.label}
               </button>
             ))}
@@ -173,8 +269,37 @@ export function App() {
         <Dock />
       </main>
       {node && <Inspector node={nodes.find((n) => n.id === node)!} onClose={() => setNode(null)} />}
-      {palette && <CommandPalette onClose={() => setPalette(false)} onSection={(s) => { setSection(s); setPalette(false); }} onMode={(m) => { setMode(m); setPalette(false); }} />}
-      {!inDesktop() && <div className="preview-badge">Browser preview · desktop services unavailable</div>}
+      {palette && (
+        <CommandPalette
+          onClose={() => setPalette(false)}
+          onSection={(s) => { setSection(s); setPalette(false); }}
+          onMode={(m) => { setMode(m); setPalette(false); }}
+          onAbout={() => { setPalette(false); setAboutOpen(true); }}
+        />
+      )}
+      {aboutOpen && (
+        <AboutModal
+          sys={sys}
+          autoUpdate={autoUpdate}
+          onAutoUpdate={setAutoUpdate}
+          updateInfo={updateInfo}
+          onCheckUpdates={() => {
+            if (!inDesktop()) {
+              setUpdateInfo({
+                currentVersion: "0.1.0",
+                latestVersion: null,
+                updateAvailable: false,
+                releaseUrl: "https://github.com/nexonic-technologies/Nexonic-AI/releases",
+                websiteUrl: "https://nexonictechnologies.com/",
+                message: "Browser preview · launch desktop app for live release checks",
+              });
+              return;
+            }
+            void ipc.checkUpdates().then((u) => { if (u) setUpdateInfo(u); });
+          }}
+          onClose={() => setAboutOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -217,7 +342,7 @@ function Sidebar({ section, onSection, sys }: { section: Section; onSection: (s:
         ))}
       </nav>
       <div className="dune" aria-hidden="true" />
-      <div className="sys-card" title={sys ? `${sys.chip} · ${formatBytes(sys.memoryBytes)} unified memory · ${sys.cpuCores} cores · ${sys.osName} ${sys.osVersion}` : undefined}>
+      <div className="sys-card" data-spot title={sys ? `${sys.chip} · ${formatBytes(sys.memoryBytes)} unified memory · ${sys.cpuCores} cores · ${sys.osName} ${sys.osVersion}` : undefined}>
         <div className="chip"><span className="apple" aria-hidden="true"></span>{sys ? chipShort(sys.chip) : "—"}</div>
         <div>
           <b>Local System</b>
@@ -227,7 +352,7 @@ function Sidebar({ section, onSection, sys }: { section: Section; onSection: (s:
         <Icon name="chart" size={16} className="bars" />
       </div>
       <button className="agents-chip" aria-label="Agent availability">
-        <span className="duo-av"><img src={shareeImg} alt="" /><img src={nexaImg} alt="" /></span>
+        <span className="duo-av"><img src={shareeNeutral} alt="" /><img src={nexaNeutral} alt="" /></span>
         <span><span className="dot off" />Both on standby</span>
         <Icon name="chev" size={14} />
       </button>
@@ -242,24 +367,41 @@ function chipShort(brand: string): string {
 
 function Mark() {
   return (
-    <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
-      <defs>
-        <linearGradient id="mk" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="var(--sharee)" /><stop offset="1" stopColor="var(--nexa)" />
-        </linearGradient>
-      </defs>
-      <path d="M6 28V6l11 13V6M17 28V15l11 13V6" fill="none" stroke="url(#mk)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <span className="nx-mark" aria-hidden="true">
+      <svg width="36" height="36" viewBox="0 0 40 40">
+        <defs>
+          <linearGradient id="nx-hex" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#4F46E5" />
+            <stop offset="0.55" stopColor="#7C3AED" />
+            <stop offset="1" stopColor="#00DEC6" />
+          </linearGradient>
+        </defs>
+        <path className="nx-hex-bg" d="M20 2 36 11v18L20 38 4 29V11Z" fill="url(#nx-hex)" />
+        <path d="M13.5 27V13l13 14V13" fill="none" stroke="#ffffff" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
   );
 }
 
-function Header({ onSearch, theme, onTheme }: { onSearch: () => void; theme: Theme; onTheme: () => void }) {
+function Header({
+  onSearch,
+  onAbout,
+  updateAvailable,
+  theme,
+  onTheme,
+}: {
+  onSearch: () => void;
+  onAbout: () => void;
+  updateAvailable: boolean;
+  theme: Theme;
+  onTheme: () => void;
+}) {
   return (
     <header className="header">
-      <div className="brand">
+      <button className="brand" onClick={onAbout} title="About Nexonic AI & Nexonic Technologies">
         <Mark />
         <div><SplitText as="b" text="NEXONIC" delay={60} stagger={40} /><span>INTELLIGENCE</span></div>
-      </div>
+      </button>
       <div className="title">
         <SplitText as="h1" text="My Intelligence Environment" delay={180} stagger={14} />
         <p>{["Two Minds", "One Collective Intelligence", "Built Around You"].map((w, i) => (
@@ -269,10 +411,15 @@ function Header({ onSearch, theme, onTheme }: { onSearch: () => void; theme: The
       <button className="search" onClick={onSearch}>
         <Icon name="search" /> <span>Search memories, files, tasks…</span> <kbd>⌘ K</kbd>
       </button>
+      {!inDesktop() && <span className="preview-chip" title="Browser preview · desktop services unavailable">Preview</span>}
+      <button className="icon-btn plain" onClick={onAbout} aria-label="About and updates" title="About Nexonic AI & Check Updates">
+        <Icon name="info" size={19} />
+        {updateAvailable && <i className="upd-dot" />}
+      </button>
       <button className="icon-btn plain" onClick={onTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
         <Icon name={theme === "dark" ? "sun" : "moon"} size={20} />
       </button>
-      <button className="icon-btn plain" aria-label="Notifications (none)"><Icon name="bell" size={22} /></button>
+      <button className="icon-btn plain" aria-label="Notifications (none)"><Icon name="bell" size={20} /></button>
       <button className="avatar" aria-label="Profile"><Icon name="user" size={20} /></button>
     </header>
   );
@@ -280,18 +427,58 @@ function Header({ onSearch, theme, onTheme }: { onSearch: () => void; theme: The
 
 const WAVE = [3, 5, 4, 7, 5, 9, 6, 11, 8, 14, 10, 17, 12, 20, 14, 18, 11, 15, 9, 12, 7, 10, 6, 8, 5, 6, 4, 5, 3, 4, 3, 2];
 
-function Presence({ name, side, state }: { name: "Sharee" | "Nexa"; side: "left" | "right"; state: PresenceState }) {
+function Presence({
+  name,
+  side,
+  state,
+  expression,
+  active,
+  onHover,
+  onCycle,
+}: {
+  name: "Sharee" | "Nexa";
+  side: "left" | "right";
+  state: PresenceState;
+  expression: { key: ExpressionKey; label: string };
+  active: boolean;
+  onHover: (hovering: boolean) => void;
+  onCycle: () => void;
+}) {
+  const src = PORTRAITS[name][expression.key];
+  const previewing = expression.key !== "neutral";
+  const liveMotion = active || previewing || state === "speaking" || state === "listening";
+  const statusTag = state === "offline"
+    ? (previewing ? `EXPRESSION: ${expression.label.toUpperCase()}` : "CLICK TO PREVIEW")
+    : "LIVE";
+
   return (
-    <div className={`presence ${side} ${name.toLowerCase()}`}>
+    <div
+      className={`presence ${side} ${name.toLowerCase()} ${active ? "is-active" : ""} ${previewing ? "is-preview" : ""}`}
+      onPointerEnter={() => onHover(true)}
+      onPointerLeave={() => onHover(false)}
+    >
       <div className="aura" />
-      <img className="portrait" src={name === "Sharee" ? shareeImg : nexaImg} alt={`${name} portrait`} draggable={false} />
+      <button
+        type="button"
+        className="portrait-stage"
+        onClick={onCycle}
+        aria-label={`${name} avatar (${expression.label}) — click to preview expressions`}
+      >
+        <span className="holo-ring" aria-hidden="true" />
+        <img key={expression.key} className="portrait" src={src} alt={`${name} ${expression.label} portrait`} draggable={false} />
+      </button>
       <div className="who">
         <SplitText as="h2" className="agent-name" text={name.toUpperCase()} delay={side === "left" ? 620 : 720} stagger={55} />
-        <p className="agent-status"><span className={`dot ${state === "offline" ? "off" : "on"}`} /><RollText value={state === "offline" ? "Standby" : presenceLabel[state]} /><i>·</i><ScrambleText text={state === "offline" ? "NO MODEL CONNECTED" : "LIVE"} delay={900} className="mono" /></p>
+        <p className="agent-status">
+          <span className={`dot ${state === "offline" ? (liveMotion ? "preview" : "off") : "on"}`} />
+          <RollText value={state === "offline" ? "Standby" : presenceLabel[state]} />
+          <i>·</i>
+          <ScrambleText text={statusTag} delay={400} className="mono" />
+        </p>
         <div className="voice">
           {side === "left" && <button className="mic-sm" disabled aria-label={`${name} voice (microphone off)`}><Icon name="mic" size={16} /></button>}
-          <div className="wave" data-live={state === "speaking" || state === "listening"} aria-hidden="true">
-            {WAVE.map((h, i) => <i key={i} style={{ height: `${h + 2}px` }} />)}
+          <div className="wave" data-live={liveMotion} aria-hidden="true">
+            {WAVE.map((h, i) => <i key={i} style={{ height: `${h + 2}px`, ["--wi" as string]: i }} />)}
           </div>
           {side === "right" && <button className="mic-sm" disabled aria-label={`${name} voice (microphone off)`}><Icon name="mic" size={16} /></button>}
         </div>
@@ -332,7 +519,6 @@ function FocusPanel() {
           /* ignore malformed stored value */
         }
       }
-      // One-time migration from legacy unencrypted localStorage into encrypted SQLite kv.
       try {
         const legacy = localStorage.getItem("nexonic:focus");
         if (legacy) {
@@ -511,11 +697,78 @@ function Inspector({ node, onClose }: { node: (typeof NODES)[number]; onClose: (
   );
 }
 
-function CommandPalette({ onClose, onSection, onMode }: { onClose: () => void; onSection: (s: Section) => void; onMode: (m: Mode) => void }) {
+function AboutModal({
+  sys,
+  autoUpdate,
+  onAutoUpdate,
+  updateInfo,
+  onCheckUpdates,
+  onClose,
+}: {
+  sys: SystemInfo | null;
+  autoUpdate: boolean;
+  onAutoUpdate: (v: boolean) => void;
+  updateInfo: UpdateStatus | null;
+  onCheckUpdates: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="scrim" onClick={onClose}>
+      <div className="about-dialog" role="dialog" aria-label="About Nexonic AI" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <Mark />
+          <div>
+            <h3>Nexonic AI</h3>
+            <small>Built by Nexonic Technologies · v{sys?.appVersion ?? "0.1.0"}</small>
+          </div>
+          <button className="ghost" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
+        </header>
+        <p className="about-lead">
+          Two independent digital minds — <b>Sharee</b> and <b>Nexa</b> — built around privacy-by-default engineering,
+          encrypted local memory, and on-device Apple Silicon intelligence.
+        </p>
+        <dl className="about-meta">
+          <dt>Company</dt><dd>Nexonic Technologies (founded by Shahrukh Khalid)</dd>
+          <dt>Website</dt><dd><a href="https://nexonictechnologies.com/" target="_blank" rel="noreferrer">nexonictechnologies.com <Icon name="external" size={12} /></a></dd>
+          <dt>Open Source</dt><dd><a href="https://github.com/nexonic-technologies/Nexonic-AI" target="_blank" rel="noreferrer">github.com/nexonic-technologies/Nexonic-AI <Icon name="external" size={12} /></a></dd>
+          <dt>Licence</dt><dd>AGPL-3.0-only (character artwork © Nexonic Technologies)</dd>
+        </dl>
+        <div className="about-updates">
+          <div>
+            <b>Software Updates</b>
+            <small>{updateInfo ? updateInfo.message : "Automatic check looks for signed GitHub releases on launch."}</small>
+          </div>
+          <div className="about-actions">
+            <label className="auto-chk">
+              <input type="checkbox" checked={autoUpdate} onChange={(e) => onAutoUpdate(e.target.checked)} />
+              <span>Auto-check</span>
+            </label>
+            <button className="secondary" onClick={onCheckUpdates}>
+              <Icon name="refresh" size={14} />Check for Updates
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CommandPalette({
+  onClose,
+  onSection,
+  onMode,
+  onAbout,
+}: {
+  onClose: () => void;
+  onSection: (s: Section) => void;
+  onMode: (m: Mode) => void;
+  onAbout: () => void;
+}) {
   const [q, setQ] = useState("");
   const items = [
     ...NAV.map((n) => ({ key: `s-${n.id}`, label: `Go to ${n.title}`, run: () => onSection(n.id) })),
     ...MODES.map((m) => ({ key: `m-${m.id}`, label: `Switch to ${m.label}`, run: () => onMode(m.id) })),
+    { key: "about-updates", label: "About Nexonic AI & Check Updates", run: onAbout },
   ].filter((i) => i.label.toLowerCase().includes(q.toLowerCase()));
   return (
     <div className="scrim" onClick={onClose}>

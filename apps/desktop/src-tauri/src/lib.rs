@@ -341,6 +341,77 @@ fn kv_set(state: State<'_, AppState>, key: String, value: String) -> Result<(), 
     m.put(&key, &value).map_err(|e| e.to_string())
 }
 
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStatus {
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub update_available: bool,
+    pub release_url: String,
+    pub website_url: String,
+    pub message: String,
+}
+
+fn parse_release_json(body: &str, current: &str) -> UpdateStatus {
+    let release_default = "https://github.com/nexonic-technologies/Nexonic-AI/releases".to_string();
+    let website = "https://nexonictechnologies.com/".to_string();
+    let parsed: Result<serde_json::Value, _> = serde_json::from_str(body);
+    if let Ok(v) = parsed {
+        if let Some(tag) = v.get("tag_name").and_then(|t| t.as_str()) {
+            let latest = tag.trim_start_matches('v').to_string();
+            let url = v
+                .get("html_url")
+                .and_then(|u| u.as_str())
+                .unwrap_or(&release_default)
+                .to_string();
+            let newer = latest != current;
+            let message = if newer {
+                format!("Update available: v{latest} (current v{current})")
+            } else {
+                format!("You are up to date (v{current})")
+            };
+            return UpdateStatus {
+                current_version: current.to_string(),
+                latest_version: Some(latest),
+                update_available: newer,
+                release_url: url,
+                website_url: website,
+                message,
+            };
+        }
+    }
+    UpdateStatus {
+        current_version: current.to_string(),
+        latest_version: None,
+        update_available: false,
+        release_url: release_default,
+        website_url: website,
+        message: format!("Running v{current} (pre-release development build)"),
+    }
+}
+
+#[tauri::command]
+fn check_updates() -> UpdateStatus {
+    let current = env!("CARGO_PKG_VERSION");
+    let out = std::process::Command::new("curl")
+        .args([
+            "-fsSL",
+            "--max-time",
+            "5",
+            "-H",
+            "Accept: application/vnd.github+json",
+            "https://api.github.com/repos/nexonic-technologies/Nexonic-AI/releases/latest",
+        ])
+        .output();
+    match out {
+        Ok(res) if res.status.success() => {
+            let body = String::from_utf8_lossy(&res.stdout);
+            parse_release_json(&body, current)
+        }
+        _ => parse_release_json("{}", current),
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
@@ -365,7 +436,8 @@ pub fn run() {
             remember_note,
             forget_memory,
             kv_get,
-            kv_set
+            kv_set,
+            check_updates
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nexonic AI");
@@ -465,5 +537,19 @@ mod tests {
         assert_eq!(recent[0].domain, "sharee");
         m.forget(Reader::User, id).unwrap();
         assert!(m.recent(Reader::User, 10).is_empty());
+    }
+
+    #[test]
+    fn release_update_parser_handles_tag_and_prerelease() {
+        let up = parse_release_json(
+            r#"{"tag_name":"v0.2.0","html_url":"https://github.com/nexonic-technologies/Nexonic-AI/releases/tag/v0.2.0"}"#,
+            "0.1.0",
+        );
+        assert!(up.update_available);
+        assert_eq!(up.latest_version.as_deref(), Some("0.2.0"));
+
+        let dev = parse_release_json("{}", "0.1.0");
+        assert!(!dev.update_available);
+        assert!(dev.latest_version.is_none());
     }
 }
