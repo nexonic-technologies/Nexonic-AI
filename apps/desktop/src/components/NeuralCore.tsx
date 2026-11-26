@@ -17,6 +17,7 @@ import type { MotionLevel } from "@nexonic/design-system";
 
 export const NODE_ANGLES: Record<string, number> = {
   Reasoning: 2.35, Perception: 0.8, Memory: 2.95, Planning: 0.2, Learning: 3.75, Action: -0.6,
+  Sharee: Math.PI, Nexa: 0,
 };
 
 const BUDGET: Record<MotionLevel, { lines: number; seg: number; spikes: number; dust: number }> = {
@@ -255,7 +256,7 @@ export function NeuralCore({
       const { width, height } = el.getBoundingClientRect();
       renderer.setSize(width, height, false);
       camera.aspect = width / Math.max(height, 1);
-      camera.position.z = 8.3 * Math.max(1, 1.05 / camera.aspect);
+      camera.position.z = 10.1 * Math.max(1, 1.08 / camera.aspect);
       camera.updateProjectionMatrix();
     };
     const ro = new ResizeObserver(resize);

@@ -35,6 +35,15 @@ export interface MemoryView {
   createdAt: number;
 }
 
+export interface UpdateStatus {
+  currentVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  releaseUrl: string;
+  websiteUrl: string;
+  message: string;
+}
+
 export type Capability =
   | "Camera"
   | "Microphone"
@@ -77,6 +86,7 @@ export const ipc = {
   forgetMemory: (id: number) => call<void>("forget_memory", { id }),
   kvGet: (key: string) => call<string | null>("kv_get", { key }),
   kvSet: (key: string, value: string) => call<void>("kv_set", { key, value }),
+  checkUpdates: () => call<UpdateStatus>("check_updates"),
 };
 
 export const capabilityLabel: Record<Capability, string> = {
