@@ -448,24 +448,53 @@ function Presence({
   const previewing = expression.key !== "neutral";
   const liveMotion = active || previewing || state === "speaking" || state === "listening";
   const statusTag = state === "offline"
-    ? (previewing ? `EXPRESSION: ${expression.label.toUpperCase()}` : "CLICK TO PREVIEW")
+    ? (previewing ? expression.label.toUpperCase() : "PREVIEW")
     : "LIVE";
+  const stageRef = useRef<HTMLButtonElement>(null);
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const el = stageRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const nx = ((e.clientX - r.left) / Math.max(1, r.width)) * 2 - 1;
+    const ny = ((e.clientY - r.top) / Math.max(1, r.height)) * 2 - 1;
+    el.style.setProperty("--hx", nx.toFixed(3));
+    el.style.setProperty("--hy", ny.toFixed(3));
+    el.style.setProperty("--hpx", `${(((nx + 1) * 0.5) * 100).toFixed(1)}%`);
+    el.style.setProperty("--hpy", `${(((ny + 1) * 0.5) * 100).toFixed(1)}%`);
+  };
+
+  const resetPointer = () => {
+    const el = stageRef.current;
+    if (!el) return;
+    el.style.setProperty("--hx", "0");
+    el.style.setProperty("--hy", "0");
+  };
 
   return (
     <div
       className={`presence ${side} ${name.toLowerCase()} ${active ? "is-active" : ""} ${previewing ? "is-preview" : ""}`}
       onPointerEnter={() => onHover(true)}
-      onPointerLeave={() => onHover(false)}
+      onPointerLeave={() => { onHover(false); resetPointer(); }}
     >
       <div className="aura" />
       <button
+        ref={stageRef}
         type="button"
         className="portrait-stage"
         onClick={onCycle}
+        onPointerMove={handlePointerMove}
         aria-label={`${name} avatar (${expression.label}) — click to preview expressions`}
+        title={`Click to cycle ${name}'s expressions`}
       >
+        <span className="holo-spot" aria-hidden="true" />
         <span className="holo-ring" aria-hidden="true" />
+        <span className="holo-scan" aria-hidden="true" />
         <img key={expression.key} className="portrait" src={src} alt={`${name} ${expression.label} portrait`} draggable={false} />
+        <span className="holo-hud" aria-hidden="true">
+          <b>{expression.label}</b>
+          <i>Click to switch</i>
+        </span>
       </button>
       <div className="who">
         <SplitText as="h2" className="agent-name" text={name.toUpperCase()} delay={side === "left" ? 620 : 720} stagger={55} />
