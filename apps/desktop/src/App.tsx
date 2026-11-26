@@ -3,6 +3,7 @@ import { presenceLabel, type MotionLevel, type PresenceState, type Theme } from 
 import { Icon, type IconName } from "./components/Icon";
 import { NeuralCore } from "./components/NeuralCore";
 import { LiveFace, type FaceAtlas, type Gaze, type Mood } from "./components/LiveFace";
+import { VideoFace, type ClipName, type ClipSet, type FaceBox } from "./components/VideoFace";
 import { MOOD_LABEL, TEMPERAMENT, usePresenceMood } from "./lib/presenceMood";
 import { CountUp, RollText, ScrambleText, SplitText, useCycle } from "./components/MotionText";
 import { capabilityLabel, formatBytes, inDesktop, ipc, type Capability, type MemorySummary, type MemoryView, type PermissionsView, type SystemInfo, type UpdateStatus } from "./lib/ipc";
@@ -34,6 +35,49 @@ function loadAtlas(who: Agent): FaceAtlas | null {
   return { yaws: manifest.yaws, pitches: manifest.pitches, exprYaws: manifest.exprYaws, frames, face: manifest.faces?.[who.toLowerCase()] };
 }
 const ATLAS: Record<Agent, FaceAtlas | null> = { Sharee: loadAtlas("Sharee"), Nexa: loadAtlas("Nexa") };
+
+// Real video clips (services/presence/process_clip.py): colour and alpha packed side by side.
+const CLIP_FILES = import.meta.glob<string>("./assets/clips/*/*.mp4", { eager: true, query: "?url", import: "default" });
+const CLIP_MANIFEST = import.meta.glob<{ faces: Record<string, FaceBox> }>("./assets/clips/manifest.json", { eager: true, import: "default" });
+function loadClips(who: Agent): { clips: ClipSet; face?: FaceBox } | null {
+  const clips: ClipSet = {};
+  const dir = `/clips/${who.toLowerCase()}/`;
+  for (const [path, url] of Object.entries(CLIP_FILES)) {
+    const at = path.indexOf(dir);
+    if (at >= 0) clips[path.slice(at + dir.length, -".mp4".length) as ClipName] = url;
+  }
+  if (!clips.idle) return null;
+  return { clips, face: Object.values(CLIP_MANIFEST)[0]?.faces[who.toLowerCase()] };
+}
+const CLIPS: Record<Agent, { clips: ClipSet; face?: FaceBox } | null> = { Sharee: loadClips("Sharee"), Nexa: loadClips("Nexa") };
+
+/**
+ * When nobody is talking to them, Sharee and Nexa now and then turn to each
+ * other and chat, then face the user again. Decorative body language only:
+ * no words are generated and it is never shown as activity.
+ */
+function usePartnerChat(quiet: boolean, reduced: boolean): boolean {
+  const [chatting, setChatting] = useState(false);
+  useEffect(() => {
+    if (!quiet || reduced) {
+      setChatting(false);
+      return;
+    }
+    let t = 0;
+    const plan = () => {
+      t = window.setTimeout(() => {
+        setChatting(true);
+        t = window.setTimeout(() => {
+          setChatting(false);
+          plan();
+        }, 8200);
+      }, 14000 + Math.random() * 12000);
+    };
+    plan();
+    return () => window.clearTimeout(t);
+  }, [quiet, reduced]);
+  return chatting;
+}
 
 const NAV: { id: Section; icon: IconName; title: string; sub: string }[] = [
   { id: "presence", icon: "presence", title: "Presence", sub: "Sharee, Nexa & You" },
@@ -169,6 +213,15 @@ export function App() {
     agentEl: (who) => document.querySelector<HTMLElement>(`.presence.${who.toLowerCase()} .portrait-stage`),
     inputEl: () => document.querySelector<HTMLElement>(".talk-field"),
   });
+  const [quiet, setQuiet] = useState(true);
+  useEffect(() => {
+    setQuiet(false);
+    if (draft.trim()) return;
+    const t = window.setTimeout(() => setQuiet(true), 6000);
+    return () => window.clearTimeout(t);
+  }, [draft, sentAt]);
+  const chatting = usePartnerChat(quiet, reduced);
+  const clipWant: ClipName = chatting ? "chat" : "idle";
 
   return (
     <div className="app" data-mode={mode}>
@@ -189,6 +242,7 @@ export function App() {
             state={agentState}
             mood={presence.Sharee.mood}
             gaze={presence.Sharee.gaze}
+            clip={clipWant}
             reduced={reduced}
             onGreet={() => setGreetAt((g) => ({ ...g, Sharee: performance.now() }))}
           />
@@ -257,6 +311,7 @@ export function App() {
             state={agentState}
             mood={presence.Nexa.mood}
             gaze={presence.Nexa.gaze}
+            clip={clipWant}
             reduced={reduced}
             onGreet={() => setGreetAt((g) => ({ ...g, Nexa: performance.now() }))}
           />
@@ -457,6 +512,7 @@ function Presence({
   state,
   mood,
   gaze,
+  clip,
   reduced,
   onGreet,
 }: {
@@ -465,14 +521,23 @@ function Presence({
   state: PresenceState;
   mood: Mood;
   gaze: () => Gaze;
+  clip: ClipName;
   reduced: boolean;
   onGreet: () => void;
 }) {
-  const live = ATLAS[name] !== null;
+  const video = CLIPS[name];
+  const live = video !== null || ATLAS[name] !== null;
   // The waveform only moves for real audio; hover and moods never fake it.
   const liveMotion = state === "speaking" || state === "listening";
   const statusTag = state === "offline" ? "NO MODEL" : "LIVE";
-  const moodLabel = MOOD_LABEL[mood];
+  // With real video the face shows what it shows; the tag only names real states.
+  const moodLabel = video
+    ? clip === "chat"
+      ? "Chatting"
+      : mood === "attentive" || mood === "thinking"
+        ? MOOD_LABEL[mood]
+        : "Present"
+    : MOOD_LABEL[mood];
 
 
   return (
@@ -489,6 +554,9 @@ function Presence({
       >
         <span className="holo-spot" aria-hidden="true" />
         <span className="holo-ring" aria-hidden="true" />
+        {video ? (
+          <VideoFace clips={video.clips} face={video.face} want={clip} reduced={reduced} label={`${name} portrait`} />
+        ) : (
         <LiveFace
           atlas={ATLAS[name]}
           fallback={FALLBACK[name]}
@@ -498,6 +566,7 @@ function Presence({
           reduced={reduced}
           label={`${name} portrait`}
         />
+        )}
         <span className="holo-hud" aria-hidden="true">
           <b><RollText value={moodLabel} /></b>
         </span>

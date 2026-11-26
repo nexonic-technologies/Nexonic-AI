@@ -23,7 +23,26 @@ Optional premium mode (later): a cloud live avatar (e.g. HeyGen LiveAvatar), off
 Next: a persistent sidecar that streams frames to the app in real time (idle, listening,
 thinking, speaking states), bundled with its own runtime so users install nothing.
 
-## Live-portrait atlas (in the app today)
+## Real video clips (in the app today)
+
+Each character has short 8-second clips that start and end on the same
+front-facing frame, so they loop and switch seamlessly:
+
+- `idle`: breathing, natural blinks, small head movements, a faint smile.
+- `chat`: turns toward the other character, talks and smiles, then faces the
+  user again. Played now and then when nobody is talking to them.
+
+```
+python process_clip.py IN.mp4 OUT.mp4 --rvm rvm_mobilenetv3_fp32.onnx   # colour | alpha, H.264
+python face_boxes.py apps/desktop/src/assets/clips                      # same eye line for both
+```
+
+Background removal uses Robust Video Matting (ONNX, CPU). The app composites
+the packed clips in WebGL (`VideoFace.tsx`). Clips are not lip-synced to real
+replies yet: that arrives with the agent runtimes and model router (M15–M17).
+Source clips stay out of the repository.
+
+## Live-portrait atlas (fallback)
 
 Until the real-time sidecar streams frames, the app plays a frame atlas that is a real
 re-animation of each character's own portrait:

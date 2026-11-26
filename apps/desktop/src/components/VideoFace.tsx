@@ -13,7 +13,8 @@ import { useEffect, useRef } from "react";
  * `idle` loops. Other clips play once when asked and then return to idle.
  */
 
-export type ClipName = "idle" | "look" | "listen" | "talk" | "smile";
+/** idle loops; chat = turning to the partner and talking; the rest are front-facing one-shots. */
+export type ClipName = "idle" | "chat" | "look" | "listen" | "talk" | "smile";
 export type ClipSet = Partial<Record<ClipName, string>>;
 export type FaceBox = { cx: number; cy: number; w: number };
 
@@ -175,6 +176,9 @@ export function VideoFace({
         lastWant = w;
         if (players.has(w)) start(w);
       }
+      // While a clip rebuffers, keep the last frame on screen instead of a blank.
+      const cur0 = players.get(current)!.v;
+      if (cur0.readyState < 2 || !cur0.videoWidth) return;
       gl.viewport(0, 0, canvas.width, canvas.height);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
