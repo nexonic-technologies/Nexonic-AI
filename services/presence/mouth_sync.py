@@ -2,9 +2,10 @@
 
 Takes the LivePortrait-animated video (which already carries identity, head
 motion, blinks, and upper-face expressions) plus the synthesized speech audio,
-detects per-frame face boxes using FasterLivePortrait's MIT-licensed MLX
-landmark model (no InsightFace, no PyTorch), runs MuseTalk 1.5 in MLX, and
-feathers only the lower-face / mouth region back onto each frame.
+detects per-frame face landmarks using FasterLivePortrait's MIT-licensed MLX
+landmark model (no InsightFace, no PyTorch), aligns a roll-free 256x256 face
+crop for MuseTalk 1.5 MLX, and warps only the feathered lower-face / jaw patch
+back onto the tilted head in each original frame.
 """
 
 from __future__ import annotations
@@ -18,102 +19,102 @@ from typing import Any, Sequence
 import cv2
 import numpy as np
 
-Box = tuple[int, int, int, int]
+MUSETALK_SIZE = 256
+# Canonical positions inside the 256x256 upright crop so MuseTalk's y=128
+# mask boundary lands cleanly on the nose bridge between eyes and lips.
+_CANON_EYE_XY = (128.0, 86.0)
+_CANON_LIP_XY = (128.0, 170.5)
+_CANON_EYE_LIP_DIST = _CANON_LIP_XY[1] - _CANON_EYE_XY[1]
 
 
-def _nose_bridge_y(landmarks: np.ndarray) -> float:
-    """Estimate the vertical midpoint (nose bridge) for MuseTalk's 256x256 crop.
-
-    MuseTalk masks the lower half (y >= 128) of the 256x256 face crop and keeps
-    the upper half as identity reference, so the midpoint must sit on the nose
-    bridge between the eyes and mouth.
-    """
+def extract_eye_lip_anchors(landmarks: np.ndarray) -> np.ndarray | None:
+    """Return shape (2, 2) float32 anchors: [eye_center, lip_center]."""
+    if landmarks is None or landmarks.ndim != 2 or landmarks.shape[0] < 5:
+        return None
     n = landmarks.shape[0]
     if n == 203:
         left_eye = np.mean(landmarks[[0, 6, 12, 18]], axis=0)
         right_eye = np.mean(landmarks[[24, 30, 36, 42]], axis=0)
-        eye_y = float(0.5 * (left_eye[1] + right_eye[1]))
-        lip_y = float(0.5 * (landmarks[48, 1] + landmarks[66, 1]))
-        return 0.62 * eye_y + 0.38 * lip_y
-    if n == 106:
+        eye_center = 0.5 * (left_eye + right_eye)
+        lip_center = 0.5 * (landmarks[48] + landmarks[66])
+        anchors = np.stack([eye_center, lip_center], axis=0).astype(np.float32)
+    elif n == 106:
         left_eye = np.mean(landmarks[[33, 35, 40, 39]], axis=0)
         right_eye = np.mean(landmarks[[87, 89, 94, 93]], axis=0)
-        eye_y = float(0.5 * (left_eye[1] + right_eye[1]))
-        lip_y = float(0.5 * (landmarks[52, 1] + landmarks[61, 1]))
-        return 0.62 * eye_y + 0.38 * lip_y
-    if n == 68:
-        return float(landmarks[29, 1])
+        eye_center = 0.5 * (left_eye + right_eye)
+        lip_center = 0.5 * (landmarks[52] + landmarks[61])
+        anchors = np.stack([eye_center, lip_center], axis=0).astype(np.float32)
+    elif n == 68:
+        left_eye = np.mean(landmarks[[36, 39]], axis=0)
+        right_eye = np.mean(landmarks[[42, 45]], axis=0)
+        eye_center = 0.5 * (left_eye + right_eye)
+        lip_center = 0.5 * (landmarks[48] + landmarks[54])
+        anchors = np.stack([eye_center, lip_center], axis=0).astype(np.float32)
+    else:
+        min_xy = np.min(landmarks, axis=0)
+        max_xy = np.max(landmarks, axis=0)
+        cx = 0.5 * (min_xy[0] + max_xy[0])
+        h = max_xy[1] - min_xy[1]
+        anchors = np.array(
+            [[cx, min_xy[1] + 0.35 * h], [cx, min_xy[1] + 0.68 * h]],
+            dtype=np.float32,
+        )
 
-    min_y = float(np.min(landmarks[:, 1]))
-    max_y = float(np.max(landmarks[:, 1]))
-    return min_y + 0.44 * (max_y - min_y)
-
-
-def compute_musetalk_box(
-    landmarks: np.ndarray,
-    frame_shape: tuple[int, ...],
-    extra_margin: int = 10,
-) -> Box | None:
-    """Compute a near-square (x1, y1, x2, y2) crop aligned for MuseTalk 1.5."""
-    if landmarks is None or landmarks.ndim != 2 or landmarks.shape[0] < 5:
+    if float(np.linalg.norm(anchors[1] - anchors[0])) < 8.0:
         return None
-    h, w = int(frame_shape[0]), int(frame_shape[1])
-    if h <= 0 or w <= 0:
-        return None
-
-    min_x = float(np.min(landmarks[:, 0]))
-    max_x = float(np.max(landmarks[:, 0]))
-    chin_y = float(np.max(landmarks[:, 1]))
-    half_y = _nose_bridge_y(landmarks)
-    half_dist = max(12.0, chin_y - half_y)
-
-    y1 = max(0, int(round(half_y - half_dist)))
-    y2 = min(h, int(round(chin_y + extra_margin)))
-    if y2 - y1 < 32:
-        return None
-
-    cx = 0.5 * (min_x + max_x)
-    face_w = max(16.0, max_x - min_x)
-    half_w = max(0.5 * face_w * 1.12, 0.5 * (y2 - y1))
-    x1 = max(0, int(round(cx - half_w)))
-    x2 = min(w, int(round(cx + half_w)))
-    if x2 - x1 < 32:
-        return None
-    return (x1, y1, x2, y2)
+    return anchors
 
 
-def smooth_boxes(boxes: Sequence[Box | None], alpha: float = 0.35) -> list[Box | None]:
-    """Fill missing detections and apply EMA smoothing to stop crop jitter."""
-    valid = [b for b in boxes if b is not None]
+def smooth_anchors(anchors: Sequence[np.ndarray | None], alpha: float = 0.45) -> list[np.ndarray | None]:
+    """Fill missing anchor frames and apply EMA smoothing to eliminate jitter."""
+    valid = [a for a in anchors if a is not None]
     if not valid:
-        return list(boxes)
+        return list(anchors)
 
-    filled: list[Box] = []
+    filled: list[np.ndarray] = []
     last = valid[0]
-    for b in boxes:
-        if b is not None:
-            last = b
+    for a in anchors:
+        if a is not None:
+            last = a
         filled.append(last)
 
-    smoothed: list[Box | None] = []
-    cur = np.array(filled[0], dtype=np.float32)
-    for b in filled:
-        cur = alpha * np.array(b, dtype=np.float32) + (1.0 - alpha) * cur
-        smoothed.append((int(round(cur[0])), int(round(cur[1])), int(round(cur[2])), int(round(cur[3]))))
+    smoothed: list[np.ndarray | None] = []
+    cur = filled[0].astype(np.float32).copy()
+    for a in filled:
+        cur = alpha * a.astype(np.float32) + (1.0 - alpha) * cur
+        smoothed.append(cur.copy())
     return smoothed
 
 
-def build_mouth_blend_mask(height: int, width: int) -> np.ndarray:
+def similarity_matrix_to_canonical(anchors: np.ndarray) -> np.ndarray:
+    """Build 2x3 affine matrix mapping (eye_center, lip_center) -> upright 256x256."""
+    eye = anchors[0].astype(np.float32)
+    lip = anchors[1].astype(np.float32)
+    down = lip - eye
+    ortho = np.array([-down[1], down[0]], dtype=np.float32)
+    src = np.stack([eye, lip, eye + ortho], axis=0)
+    dst = np.array(
+        [
+            _CANON_EYE_XY,
+            _CANON_LIP_XY,
+            (_CANON_EYE_XY[0] - _CANON_EYE_LIP_DIST, _CANON_EYE_XY[1]),
+        ],
+        dtype=np.float32,
+    )
+    return cv2.getAffineTransform(src, dst)
+
+
+def build_mouth_blend_mask(height: int = MUSETALK_SIZE, width: int = MUSETALK_SIZE) -> np.ndarray:
     """Create a soft (H, W, 1) float32 mask targeting the lower face and jaw."""
     mask = np.zeros((height, width), dtype=np.float32)
-    cy = int(round(height * 0.72))
+    cy = int(round(height * 0.70))
     cx = int(round(width * 0.50))
-    ry = max(4, int(round(height * 0.22)))
-    rx = max(4, int(round(width * 0.33)))
+    ry = max(4, int(round(height * 0.19)))
+    rx = max(4, int(round(width * 0.27)))
     cv2.ellipse(mask, (cx, cy), (rx, ry), 0, 0, 360, 1.0, -1)
-    # Keep upper face / nose bridge untouched
-    mask[: int(round(height * 0.46)), :] = 0.0
-    k = max(5, (min(height, width) // 8) | 1)
+    # Keep upper face / nose bridge untouched (matches MuseTalk's y=128 split)
+    mask[: int(round(height * 0.50)), :] = 0.0
+    k = max(5, (min(height, width) // 10) | 1)
     mask = cv2.GaussianBlur(mask, (k, k), 0)
     peak = float(mask.max())
     if peak > 1e-6:
@@ -141,7 +142,6 @@ def apply_musetalk_to_video(
     weights_dir: Path,
     face_analyzer: Any,
     *,
-    extra_margin: int = 10,
     batch_size: int = 8,
 ) -> dict[str, Any]:
     """Refine mouth visemes on an animated talking video using MuseTalk 1.5 MLX."""
@@ -168,14 +168,11 @@ def apply_musetalk_to_video(
     if not frames:
         raise RuntimeError(f"Video contained 0 frames: {video_path}")
 
-    raw_boxes: list[Box | None] = []
+    raw_anchors: list[np.ndarray | None] = []
     for frame in frames:
         faces = face_analyzer.predict(frame)
-        if faces:
-            raw_boxes.append(compute_musetalk_box(faces[0], frame.shape, extra_margin=extra_margin))
-        else:
-            raw_boxes.append(None)
-    boxes = smooth_boxes(raw_boxes)
+        raw_anchors.append(extract_eye_lip_anchors(faces[0]) if faces else None)
+    anchors = smooth_anchors(raw_anchors)
 
     pipe = MuseTalkPipeline.from_pretrained_mlx(weights_dir)
     chunks = pipe.encode_audio_from_wav(str(audio_path), fps=int(round(fps)))
@@ -185,14 +182,24 @@ def apply_musetalk_to_video(
         raise RuntimeError("Audio produced 0 MuseTalk chunks")
 
     latents = []
+    crops: dict[int, np.ndarray] = {}
+    matrices: dict[int, np.ndarray] = {}
     valid_indices: list[int] = []
     for i in range(n_frames):
-        box = boxes[i]
-        if box is None:
+        anc = anchors[i]
+        if anc is None:
             continue
-        x1, y1, x2, y2 = box
-        crop = cv2.resize(frames[i][y1:y2, x1:x2], (256, 256), interpolation=cv2.INTER_LANCZOS4)
+        m_fwd = similarity_matrix_to_canonical(anc)
+        crop = cv2.warpAffine(
+            frames[i],
+            m_fwd,
+            (MUSETALK_SIZE, MUSETALK_SIZE),
+            flags=cv2.INTER_LANCZOS4,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
         latents.append(pipe.get_latents_for_unet(crop))
+        crops[i] = crop
+        matrices[i] = m_fwd
         valid_indices.append(i)
 
     if not valid_indices:
@@ -203,6 +210,7 @@ def apply_musetalk_to_video(
     recon = pipe.run_batched(lat_stack, chunks[idx_mx], batch_size=batch_size)
 
     recon_by_frame = {frame_idx: recon[pos] for pos, frame_idx in enumerate(valid_indices)}
+    canon_mask = build_mouth_blend_mask(MUSETALK_SIZE, MUSETALK_SIZE)
     h, w = frames[0].shape[:2]
 
     with tempfile.TemporaryDirectory(prefix="musetalk-out-") as tmp:
@@ -210,20 +218,33 @@ def apply_musetalk_to_video(
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         writer = cv2.VideoWriter(str(silent_path), fourcc, float(fps), (w, h))
         for i, frame in enumerate(frames):
-            box = boxes[i] if i < len(boxes) else None
             gen = recon_by_frame.get(i)
-            if box is None or gen is None:
+            m_fwd = matrices.get(i)
+            if gen is None or m_fwd is None:
                 writer.write(frame)
                 continue
-            x1, y1, x2, y2 = box
-            patch = cv2.resize(gen, (x2 - x1, y2 - y1), interpolation=cv2.INTER_LANCZOS4)
-            target = frame[y1:y2, x1:x2]
-            mask = build_mouth_blend_mask(y2 - y1, x2 - x1)
-            matched = match_skin_tone(patch, target, mask)
-            blended = (matched.astype(np.float32) * mask + target.astype(np.float32) * (1.0 - mask))
-            out_frame = frame.copy()
-            out_frame[y1:y2, x1:x2] = np.clip(blended, 0, 255).astype(np.uint8)
-            writer.write(out_frame)
+            matched = match_skin_tone(gen, crops[i], canon_mask)
+            m_inv = cv2.invertAffineTransform(m_fwd)
+            warped_patch = cv2.warpAffine(
+                matched,
+                m_inv,
+                (w, h),
+                flags=cv2.INTER_LANCZOS4,
+                borderMode=cv2.BORDER_REPLICATE,
+            )
+            warped_mask = cv2.warpAffine(
+                canon_mask[..., 0],
+                m_inv,
+                (w, h),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=0.0,
+            )[..., None]
+            blended = (
+                warped_patch.astype(np.float32) * warped_mask
+                + frame.astype(np.float32) * (1.0 - warped_mask)
+            )
+            writer.write(np.clip(blended, 0, 255).astype(np.uint8))
         writer.release()
 
         out_path.parent.mkdir(parents=True, exist_ok=True)

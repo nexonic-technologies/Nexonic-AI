@@ -1,4 +1,4 @@
-"""Unit tests for the presence persona specification and MuseTalk crop/blend math."""
+"""Unit tests for the presence persona specification and MuseTalk alignment math."""
 
 from __future__ import annotations
 
@@ -15,10 +15,12 @@ try:
     import cv2  # noqa: F401
     import numpy as np
     from mouth_sync import (
+        MUSETALK_SIZE,
         build_mouth_blend_mask,
-        compute_musetalk_box,
+        extract_eye_lip_anchors,
         match_skin_tone,
-        smooth_boxes,
+        similarity_matrix_to_canonical,
+        smooth_anchors,
     )
 
     HAS_CV = True
@@ -45,40 +47,38 @@ class PersonasSpecTests(unittest.TestCase):
 
 @unittest.skipUnless(HAS_CV, "cv2 and numpy required for mouth_sync geometry tests")
 class MouthSyncGeometryTests(unittest.TestCase):
-    def test_compute_box_203_points_stays_in_bounds(self) -> None:
+    def test_similarity_warp_uprights_tilted_face(self) -> None:
         lmk = np.zeros((203, 2), dtype=np.float32)
-        lmk[:, 0] = np.linspace(120, 220, 203)
-        lmk[:, 1] = np.linspace(100, 230, 203)
-        lmk[[0, 6, 12, 18], 1] = 130.0
-        lmk[[24, 30, 36, 42], 1] = 130.0
-        lmk[48, 1] = 190.0
-        lmk[66, 1] = 196.0
-        box = compute_musetalk_box(lmk, (320, 340, 3), extra_margin=10)
-        self.assertIsNotNone(box)
-        x1, y1, x2, y2 = box  # type: ignore[misc]
-        self.assertGreaterEqual(x1, 0)
-        self.assertGreaterEqual(y1, 0)
-        self.assertLessEqual(x2, 340)
-        self.assertLessEqual(y2, 320)
-        self.assertGreater(x2 - x1, 40)
-        self.assertGreater(y2 - y1, 40)
+        # Simulate a tilted head (eye line sloped downward-right, lip shifted left)
+        lmk[[0, 6, 12, 18]] = np.array([150.0, 125.0], dtype=np.float32)
+        lmk[[24, 30, 36, 42]] = np.array([210.0, 145.0], dtype=np.float32)
+        lmk[48] = np.array([145.0, 195.0], dtype=np.float32)
+        lmk[66] = np.array([175.0, 205.0], dtype=np.float32)
 
-    def test_smooth_boxes_fills_gaps(self) -> None:
-        boxes = [(10, 10, 110, 110), None, (14, 14, 114, 114)]
-        out = smooth_boxes(boxes, alpha=0.5)
+        anc = extract_eye_lip_anchors(lmk)
+        self.assertIsNotNone(anc)
+        m = similarity_matrix_to_canonical(anc)  # type: ignore[arg-type]
+        pts = np.hstack([anc, np.ones((2, 1), dtype=np.float32)]) @ m.T  # type: ignore[arg-type]
+        np.testing.assert_allclose(pts[0], [128.0, 86.0], atol=1e-3)
+        np.testing.assert_allclose(pts[1], [128.0, 170.5], atol=1e-3)
+
+    def test_smooth_anchors_fills_gaps(self) -> None:
+        a0 = np.array([[100.0, 100.0], [100.0, 170.0]], dtype=np.float32)
+        a2 = np.array([[104.0, 102.0], [104.0, 172.0]], dtype=np.float32)
+        out = smooth_anchors([a0, None, a2], alpha=0.5)
         self.assertEqual(len(out), 3)
-        self.assertTrue(all(b is not None for b in out))
+        self.assertTrue(all(a is not None for a in out))
 
     def test_mouth_mask_keeps_upper_face_zero(self) -> None:
-        mask = build_mouth_blend_mask(256, 256)
-        self.assertEqual(mask.shape, (256, 256, 1))
-        self.assertLess(float(mask[:90, :, 0].max()), 0.05)
-        self.assertGreater(float(mask[175:205, 110:145, 0].mean()), 0.5)
+        mask = build_mouth_blend_mask(MUSETALK_SIZE, MUSETALK_SIZE)
+        self.assertEqual(mask.shape, (MUSETALK_SIZE, MUSETALK_SIZE, 1))
+        self.assertLess(float(mask[:105, :, 0].max()), 0.05)
+        self.assertGreater(float(mask[165:195, 110:145, 0].mean()), 0.5)
 
     def test_match_skin_tone_preserves_shape_and_dtype(self) -> None:
-        gen = np.full((64, 64, 3), 100, dtype=np.uint8)
-        tgt = np.full((64, 64, 3), 110, dtype=np.uint8)
-        mask = build_mouth_blend_mask(64, 64)
+        gen = np.full((MUSETALK_SIZE, MUSETALK_SIZE, 3), 100, dtype=np.uint8)
+        tgt = np.full((MUSETALK_SIZE, MUSETALK_SIZE, 3), 110, dtype=np.uint8)
+        mask = build_mouth_blend_mask(MUSETALK_SIZE, MUSETALK_SIZE)
         out = match_skin_tone(gen, tgt, mask)
         self.assertEqual(out.shape, gen.shape)
         self.assertEqual(out.dtype, np.uint8)
