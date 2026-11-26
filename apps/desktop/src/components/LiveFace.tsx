@@ -96,14 +96,23 @@ export function LiveFace({
     ).then(() => { if (!cancelled) ready = true; });
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const fit = () => {
+    let fitRaf = 0;
+    const syncSize = () => {
       const r = canvas.getBoundingClientRect();
-      canvas.width = Math.max(1, Math.round(r.width * dpr));
-      canvas.height = Math.max(1, Math.round(r.height * dpr));
+      const nw = Math.max(1, Math.round(r.width * dpr));
+      const nh = Math.max(1, Math.round(r.height * dpr));
+      if (canvas.width !== nw || canvas.height !== nh) {
+        canvas.width = nw;
+        canvas.height = nh;
+      }
     };
-    const ro = new ResizeObserver(fit);
+    const scheduleFit = () => {
+      if (fitRaf) return;
+      fitRaf = requestAnimationFrame(() => { fitRaf = 0; syncSize(); });
+    };
+    const ro = new ResizeObserver(scheduleFit);
     ro.observe(canvas);
-    fit();
+    syncSize();
 
     let shown = "";
     let prev = "";
@@ -241,6 +250,7 @@ export function LiveFace({
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
+      if (fitRaf) cancelAnimationFrame(fitRaf);
       ro.disconnect();
     };
   }, [atlas, reduced, temperament]);
