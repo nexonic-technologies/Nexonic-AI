@@ -7,7 +7,7 @@ name: Presence probe
 on:
   workflow_dispatch:
   push:
-    paths: ["services/presence/**", "!services/presence/render_atlas.py", "!services/presence/atlas_spec.json", ".github/workflows/presence.yml"]
+    paths: ["services/presence/**", "!services/presence/render_atlas.py", "!services/presence/atlas_spec.json", "!services/presence/matte_atlas.py", ".github/workflows/presence.yml"]
 
 permissions:
   contents: read
