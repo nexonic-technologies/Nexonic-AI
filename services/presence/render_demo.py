@@ -63,6 +63,7 @@ def main() -> int:
 
     from src.pipelines.gradio_live_portrait_pipeline import GradioLivePortraitPipeline  # noqa: E402
     from src.runtime_assets import ensure_runtime_assets  # noqa: E402
+    from src.utils.mlx_profiles import apply_mlx_profile  # noqa: E402
 
     report: dict = {
         "machine": platform.platform(),
@@ -75,7 +76,12 @@ def main() -> int:
     t0 = time.time()
     ensure_runtime_assets(cfg)
     report["assets_seconds"] = round(time.time() - t0, 1)
+    apply_mlx_profile("quality")
     pipe = GradioLivePortraitPipeline(cfg)
+    pipe.set_mlx_profile("quality")
+    t1 = time.time()
+    pipe.init_models(is_animal=False)  # the web UI loads lazily; load explicitly here
+    report["models_seconds"] = round(time.time() - t1, 1)
 
     for name in [a.strip() for a in args.agents.split(",") if a.strip()]:
         spec = AGENTS[name]
