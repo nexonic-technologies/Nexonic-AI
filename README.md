@@ -7,8 +7,8 @@ Nexonic AI is a personal intelligence environment for Apple Silicon macOS, built
 personalities, **Sharee** and **Nexa**, each with its own reasoning context, private memory,
 voice and learning history, who collaborate through a shared Collective Intelligence layer.
 
-> **Status: early development.** The repository foundation, security baseline and first
-> core crates are in place. There is no installable app yet. See
+> **Status: early development.** The macOS app shell runs with the dashboard, live system
+> detection, permissions and memory isolation. Agents, voice and awareness are not connected yet. See
 > [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for what is real today.
 
 ## Planned stack
@@ -28,8 +28,8 @@ voice and learning history, who collaborate through a shared Collective Intellig
 
 ```text
 crates/        Rust libraries (permissions, memory engine, model router, agent runtime, …)
-apps/desktop/  Tauri desktop app (planned)
-packages/      Shared TypeScript packages: design system, motion, visualization (planned)
+apps/desktop/  Tauri 2 macOS app: React interface + Rust core
+packages/      Shared TypeScript packages (design-system)
 services/      Native macOS and local-inference services (planned)
 docs/          Architecture, milestones, status and limitations
 scripts/       Owner-policy checks and Git hooks
@@ -41,8 +41,12 @@ scripts/       Owner-policy checks and Git hooks
 git clone https://github.com/nexonic-technologies/Nexonic-AI.git
 cd Nexonic-AI
 git config core.hooksPath scripts/hooks   # owner-only + secret checks before commit/push
+npm ci
+npm run dev          # runs the macOS app with hot reload (needs Xcode command-line tools + Rust)
 cargo test --workspace
 ```
+
+Platform: **macOS on Apple Silicon** first. Windows comes after the macOS product is final.
 
 ## Documentation
 
@@ -56,4 +60,7 @@ cargo test --workspace
 
 ## License
 
-Not yet chosen. Until a license is added, all rights are reserved by Nexonic Technologies.
+Nexonic AI is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only).
+Commercial licences, signed builds and premium character and voice packs are available from
+[Nexonic Technologies](https://nexonictechnologies.com/). Character artwork in
+`apps/desktop/src/assets/characters/` is © Nexonic Technologies and is not covered by the AGPL.
