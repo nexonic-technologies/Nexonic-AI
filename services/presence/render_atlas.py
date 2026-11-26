@@ -28,7 +28,8 @@ YAWS = (-14, -7, 0, 7, 14)
 PITCHES = (-8, 0, 8)
 # Expression frames are rendered at three head turns so moods can still look around.
 EXPR_YAWS = (-8, 0, 8)
-EYES_CLOSED = -18.0
+# Blinks use LivePortrait's eye-retargeting network (target eye-open ratio).
+EYE_RATIO = {"h": 0.17, "c": 0.0}
 
 
 def load_spec() -> dict:
@@ -110,10 +111,10 @@ def frame_plan(spec: dict, persona: str) -> list[tuple[str, dict]]:
 
     for pitch in PITCHES:
         for yaw in YAWS:
-            for eye in ("o", "c"):
+            for eye in ("o", "h", "c"):
                 c = pose(yaw, pitch)
-                if eye == "c":
-                    c["eyes"] = EYES_CLOSED
+                if eye in EYE_RATIO:
+                    c["eye_ratio"] = EYE_RATIO[eye]
                 plan.append((f"g_{yaw}_{pitch}_{eye}", c))
 
     intensity = p["intensity"]
@@ -125,8 +126,8 @@ def frame_plan(spec: dict, persona: str) -> list[tuple[str, dict]]:
                 for k, v in base.items():
                     if not k.startswith("_"):
                         c[k] = c.get(k, 0.0) + v * scale
-                if eye == "c":
-                    c["eyes"] = EYES_CLOSED
+                if eye in EYE_RATIO:
+                    c["eye_ratio"] = EYE_RATIO[eye]
                 plan.append((f"e_{name}_{yaw}_{eye}", c))
     return plan
 
@@ -172,7 +173,7 @@ def main() -> int:
         if not pipe.prepare_source(str(src_png)):
             raise SystemExit(f"{name}: {pipe.prepare_source_error}")
         info = pipe.src_infos[0][0]
-        x_s_info, _lmk, _R, f_s, x_s, _xcs = info[:6]
+        x_s_info, src_lmk, _R, f_s, x_s, _xcs = info[:6]
         mask_ori, m_c2o = info[-2], info[-1]
         img = pipe.src_imgs[0]
         kp = x_s_info["kp"].reshape(1, -1, 3)
@@ -191,6 +192,9 @@ def main() -> int:
             R = get_rotation_matrix(x_s_info["pitch"] + dp, x_s_info["yaw"] + dy, x_s_info["roll"] + dr)
             x_d = (kp @ R + exp + delta) * scale
             x_d[:, :, 0:2] += t[:, None, 0:2]
+            if "eye_ratio" in c:
+                ratio = pipe.calc_combined_eye_ratio([[c["eye_ratio"]]], src_lmk)
+                x_d = x_d + pipe.retarget_eye(x_s, ratio).reshape(x_d.shape)
             x_d = pipe.stitching(x_s, x_d.astype(np.float32))
             if hasattr(warp, "reset_temporal_cache"):
                 warp.reset_temporal_cache()  # every atlas frame is independent

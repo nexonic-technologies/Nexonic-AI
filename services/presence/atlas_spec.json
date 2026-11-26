@@ -10,7 +10,7 @@
     "thinking": { "brow": -5, "pupil_y": 7, "pupil_x": -5, "pitch": -3, "smile": -0.1, "_facs": "AU4 AU7 AU17 + gaze up" },
     "concerned": { "brow": -8, "smile": -0.25, "eyes": 2, "_facs": "AU1 AU4 AU15" },
     "confident": { "smile": 0.35, "pitch": -4, "eyes": -2, "_facs": "AU12 AU17 + chin up" },
-    "calm": { "smile": 0.25, "eyes": -6, "_facs": "AU12 soft + relaxed lids" },
+    "calm": { "smile": 0.25, "eyes": -2.5, "_facs": "AU12 soft + relaxed lids" },
     "determined": { "brow": -6, "eyes": -3, "smile": -0.1, "_facs": "AU4 AU7 AU23" }
   },
   "personas": {
