@@ -66,6 +66,16 @@ jobs:
           ls -la "$RUNNER_TEMP/presence"
           # record the exact model snapshots used, for pinning
           find ~/.cache/huggingface/hub -maxdepth 3 -path '*/snapshots/*' -type d | tee "$RUNNER_TEMP/presence/model-snapshots.txt"
+      - name: Review previews (compressed, printed to the log)
+        run: |
+          cd "$RUNNER_TEMP/presence"
+          cat report.json model-snapshots.txt
+          for n in sharee nexa; do
+            ffprobe -v error -show_entries stream=width,height,r_frame_rate:format=duration -of compact "$n-talking.mp4"
+            ffmpeg -v error -y -i "$n-talking.mp4" -vf "scale=-2:480" -c:v libx264 -preset slow -crf 27 -c:a aac -b:a 64k -movflags +faststart "$n-preview.mp4"
+            ls -la "$n-preview.mp4"
+            base64 -i "$n-preview.mp4" | fold -w 4000 | sed "s/^/B64:$n:/"
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
