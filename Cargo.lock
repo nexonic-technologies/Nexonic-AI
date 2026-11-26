@@ -2096,6 +2096,7 @@ name = "nexonic-ai-desktop"
 version = "0.1.0"
 dependencies = [
  "nexonic-memory-engine",
+ "nexonic-model-router",
  "nexonic-permissions",
  "security-framework",
  "serde",
@@ -2113,6 +2114,15 @@ dependencies = [
  "chacha20poly1305",
  "rand",
  "rusqlite",
+ "zeroize",
+]
+
+[[package]]
+name = "nexonic-model-router"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
  "zeroize",
 ]
 

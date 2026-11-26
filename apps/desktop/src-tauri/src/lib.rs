@@ -12,6 +12,10 @@ use std::sync::Mutex;
 
 use nexonic_memory_engine::persist::{generate_key, PersistentMemory};
 use nexonic_memory_engine::{AgentId, Domain, Kind, Memory, MemoryId, NewMemory, Reader};
+use nexonic_model_router::{
+    fetch_openrouter_catalogue, ChatMessage, CompletionResult, ModelEntry, ModelRouter,
+    OpenRouterHttpTransport, RouterConfig,
+};
 use nexonic_permissions::{Actor, Capability, Decision, Permissions, Scope};
 use serde::Serialize;
 use tauri::{Manager, State};
@@ -20,18 +24,39 @@ use tauri::{Manager, State};
 pub struct AppState {
     permissions: Mutex<Permissions>,
     memory: Mutex<PersistentMemory>,
+    router: Mutex<ModelRouter>,
     persistent: bool,
     /// Why the encrypted on-disk store could not be opened, if it failed.
     /// The app then runs on a temporary in-memory store and says so.
     storage_error: Option<String>,
 }
 
+fn router_from_memory(mem: &PersistentMemory) -> ModelRouter {
+    let allow_paid = mem
+        .get_value("router.allow_paid")
+        .ok()
+        .flatten()
+        .is_some_and(|v| v == "true");
+    let preferred_model = mem
+        .get_value("router.preferred_model")
+        .ok()
+        .flatten()
+        .filter(|s| !s.trim().is_empty());
+    ModelRouter::new(RouterConfig {
+        allow_paid,
+        preferred_model,
+        ..RouterConfig::default()
+    })
+}
+
 impl AppState {
     pub fn open_persistent(path: &Path, key: &[u8; 32]) -> Result<Self, String> {
         let mem = PersistentMemory::open(path, key).map_err(|e| e.to_string())?;
+        let router = router_from_memory(&mem);
         Ok(Self {
             permissions: Mutex::new(Permissions::new()),
             memory: Mutex::new(mem),
+            router: Mutex::new(router),
             persistent: true,
             storage_error: None,
         })
@@ -43,6 +68,7 @@ impl AppState {
         Ok(Self {
             permissions: Mutex::new(Permissions::new()),
             memory: Mutex::new(mem),
+            router: Mutex::new(ModelRouter::default()),
             persistent: false,
             storage_error: None,
         })
@@ -65,6 +91,7 @@ impl AppState {
                 Self {
                     permissions: Mutex::new(Permissions::new()),
                     memory: Mutex::new(mem),
+                    router: Mutex::new(ModelRouter::default()),
                     persistent: false,
                     storage_error: Some(err),
                 }
@@ -475,6 +502,143 @@ fn fetch_update_status() -> UpdateStatus {
     }
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderStatus {
+    pub provider: String,
+    pub has_key: bool,
+    pub key_hint: Option<String>,
+    pub allow_paid: bool,
+    pub preferred_model: Option<String>,
+    pub free_count: usize,
+    pub total_count: usize,
+    pub cooldown_count: usize,
+    pub models: Vec<ModelEntry>,
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn build_provider_status(state: &AppState) -> Result<ProviderStatus, String> {
+    let key = keychain::load_provider_key("openrouter")?;
+    let now = now_secs();
+    let mut r = state.router.lock().map_err(|e| e.to_string())?;
+    r.clear_expired_cooldowns(now);
+    let total_count = r.catalogue().len();
+    let free_count = r.catalogue().iter().filter(|m| m.is_free).count();
+    let models: Vec<ModelEntry> = r
+        .visible_catalogue()
+        .into_iter()
+        .take(40)
+        .cloned()
+        .collect();
+    Ok(ProviderStatus {
+        provider: "openrouter".into(),
+        has_key: key.is_some(),
+        key_hint: key.as_deref().map(|s| keychain::mask_key(s)),
+        allow_paid: r.config().allow_paid,
+        preferred_model: r.config().preferred_model.clone(),
+        free_count,
+        total_count,
+        cooldown_count: r.cooldown_count(now),
+        models,
+    })
+}
+
+#[tauri::command]
+fn provider_status(state: State<'_, AppState>) -> Result<ProviderStatus, String> {
+    build_provider_status(&state)
+}
+
+#[tauri::command]
+fn save_provider_key(
+    state: State<'_, AppState>,
+    api_key: String,
+) -> Result<ProviderStatus, String> {
+    keychain::save_provider_key("openrouter", &api_key)?;
+    build_provider_status(&state)
+}
+
+#[tauri::command]
+fn clear_provider_key(state: State<'_, AppState>) -> Result<ProviderStatus, String> {
+    keychain::delete_provider_key("openrouter")?;
+    build_provider_status(&state)
+}
+
+#[tauri::command]
+fn set_router_policy(
+    state: State<'_, AppState>,
+    allow_paid: bool,
+    preferred_model: Option<String>,
+) -> Result<ProviderStatus, String> {
+    {
+        let mut r = state.router.lock().map_err(|e| e.to_string())?;
+        r.set_policy(allow_paid, preferred_model.clone());
+    }
+    {
+        let mut m = state.memory.lock().map_err(|e| e.to_string())?;
+        m.put(
+            "router.allow_paid",
+            if allow_paid { "true" } else { "false" },
+        )
+        .map_err(|e| e.to_string())?;
+        m.put(
+            "router.preferred_model",
+            preferred_model.as_deref().unwrap_or("").trim(),
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    build_provider_status(&state)
+}
+
+#[tauri::command]
+async fn refresh_models(state: State<'_, AppState>) -> Result<ProviderStatus, String> {
+    let key = keychain::load_provider_key("openrouter")?;
+    let models = tauri::async_runtime::spawn_blocking(move || {
+        fetch_openrouter_catalogue(key.as_deref().map(|s| s.as_str()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    {
+        let mut r = state.router.lock().map_err(|e| e.to_string())?;
+        r.update_catalogue(models);
+    }
+    build_provider_status(&state)
+}
+
+#[tauri::command]
+async fn test_completion(
+    state: State<'_, AppState>,
+    prompt: String,
+) -> Result<CompletionResult, String> {
+    let Some(api_key) = keychain::load_provider_key("openrouter")? else {
+        return Err("Save an OpenRouter API key in Intelligence → Providers first.".into());
+    };
+    let clean_prompt = prompt.trim().to_string();
+    if clean_prompt.is_empty() {
+        return Err("Prompt must not be empty.".into());
+    }
+    let now = now_secs();
+    let mut router_snapshot = state.router.lock().map_err(|e| e.to_string())?.clone();
+    let res = tauri::async_runtime::spawn_blocking(move || {
+        let msgs = vec![ChatMessage {
+            role: "user".into(),
+            content: clean_prompt,
+        }];
+        let out = router_snapshot.complete_chat(&api_key, &msgs, now, &OpenRouterHttpTransport);
+        (router_snapshot, out)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    *state.router.lock().map_err(|e| e.to_string())? = res.0;
+    res.1.map_err(|e| e.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
@@ -498,7 +662,13 @@ pub fn run() {
             forget_memory,
             kv_get,
             kv_set,
-            check_updates
+            check_updates,
+            provider_status,
+            save_provider_key,
+            clear_provider_key,
+            set_router_policy,
+            refresh_models,
+            test_completion
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nexonic AI");
@@ -619,5 +789,34 @@ mod tests {
         let dev = parse_release_json("{}", "0.1.0");
         assert!(!dev.update_available);
         assert!(dev.latest_version.is_none());
+    }
+
+    #[test]
+    fn router_policy_defaults_free_and_restores_from_memory() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "nexonic-router-mem-{}-{}.sqlite",
+            std::process::id(),
+            now_secs()
+        ));
+        let key = generate_key();
+        {
+            let st = AppState::open_persistent(&path, &key).unwrap();
+            let status = build_provider_status(&st).unwrap();
+            assert!(!status.allow_paid);
+            assert!(status.free_count > 0);
+            let mut m = st.memory.lock().unwrap();
+            m.put("router.allow_paid", "true").unwrap();
+            m.put("router.preferred_model", "google/gemma-3-27b-it:free")
+                .unwrap();
+        }
+        let reopened = AppState::open_persistent(&path, &key).unwrap();
+        let status2 = build_provider_status(&reopened).unwrap();
+        assert!(status2.allow_paid);
+        assert_eq!(
+            status2.preferred_model.as_deref(),
+            Some("google/gemma-3-27b-it:free")
+        );
+        let _ = std::fs::remove_file(&path);
     }
 }

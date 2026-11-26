@@ -24,7 +24,8 @@ Classification: **Implemented** · **Tested** · **Experimental** · **Blocked**
 | Interactive core (magnetic cursor field, needles, click shockwave, drag-to-spin with momentum) | Implemented | `NeuralCore.tsx`; cursor play is never reported as agent activity |
 | Talking Sharee/Nexa (on-device: Kokoro → JoyVASA → LivePortrait MLX → MuseTalk 1.5 MLX) | Experimental | `services/presence`, `Presence probe` workflow; persona/expression specs in `personas.json` |
 | Audit fixes (26 Nov) | Tested | owner-policy handles rewritten branches; graceful encrypted-storage fallback; update check async, semver, opt-in; waveform moves only for real audio; Today's Focus save race fixed; 1280×800 Awareness panel fit |
-| Agents, collaboration feed, memory events, voice | Pending | panels show honest empty states until M16/M17/M28 |
+| Agents, collaboration feed, memory events, voice | Pending | panels show honest empty states until M16/M28 |
+| Model router (`crates/model-router`, Keychain OpenRouter key, free-only default, 429 cooldown fallback, Intelligence → OpenRouter modal) | Tested | `crates/model-router`, `src-tauri/src/keychain.rs`, `App.tsx` |
 | Character art | Interim | owner concept art; real-time digital humans in M15 |
 | Agents, model routing, voice, awareness, automation | Pending | Phases C–E |
 | Packaging and releases | Pending | M47/M48 |

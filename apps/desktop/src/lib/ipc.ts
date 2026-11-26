@@ -46,6 +46,31 @@ export interface UpdateStatus {
   message: string;
 }
 
+export interface ModelEntry {
+  id: string;
+  name: string;
+  isFree: boolean;
+  contextLength: number;
+}
+
+export interface ProviderStatus {
+  provider: string;
+  hasKey: boolean;
+  keyHint: string | null;
+  allowPaid: boolean;
+  preferredModel: string | null;
+  freeCount: number;
+  totalCount: number;
+  cooldownCount: number;
+  models: ModelEntry[];
+}
+
+export interface CompletionResult {
+  model: string;
+  content: string;
+  attempts: number;
+}
+
 export type Capability =
   | "Camera"
   | "Microphone"
@@ -89,6 +114,13 @@ export const ipc = {
   kvGet: (key: string) => call<string | null>("kv_get", { key }),
   kvSet: (key: string, value: string) => call<void>("kv_set", { key, value }),
   checkUpdates: () => call<UpdateStatus>("check_updates"),
+  providerStatus: () => call<ProviderStatus>("provider_status"),
+  saveProviderKey: (apiKey: string) => call<ProviderStatus>("save_provider_key", { apiKey }),
+  clearProviderKey: () => call<ProviderStatus>("clear_provider_key"),
+  setRouterPolicy: (allowPaid: boolean, preferredModel: string | null) =>
+    call<ProviderStatus>("set_router_policy", { allowPaid, preferredModel }),
+  refreshModels: () => call<ProviderStatus>("refresh_models"),
+  testCompletion: (prompt: string) => call<CompletionResult>("test_completion", { prompt }),
 };
 
 export const capabilityLabel: Record<Capability, string> = {
