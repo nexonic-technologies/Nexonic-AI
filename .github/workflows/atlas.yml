@@ -6,7 +6,7 @@ name: Presence atlas
 on:
   workflow_dispatch:
   push:
-    paths: ["services/presence/render_atlas.py", "services/presence/atlas_spec.json", ".github/workflows/atlas.yml"]
+    paths: ["services/presence/render_atlas.py", "services/presence/matte_atlas.py", "services/presence/atlas_spec.json", ".github/workflows/atlas.yml"]
 
 permissions:
   contents: read
@@ -20,6 +20,8 @@ env:
   FLP_COMMIT: d5361f4806c14fe2051eecb1dd5a89930f46db0d
   # pinned model snapshots (verified 26 Nov 2026)
   FLIP_MLX_WEIGHTS_REVISION: 2cc2ac92c9fe65ca4fb68cb1a1556ead285e7391
+  # BiRefNet-portrait (MIT) for transparent backgrounds; empty = resolve and print, then pin
+  BIREFNET_REVISION: ""
   # plain HTTP downloads with timeouts (the xet transfer stalled for an hour once)
   HF_HUB_DISABLE_XET: "1"
   HF_HUB_DOWNLOAD_TIMEOUT: "60"
@@ -46,7 +48,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/huggingface
-          key: hf-atlas-${{ env.FLP_COMMIT }}-v1
+          key: hf-atlas-${{ env.FLP_COMMIT }}-v2
       - name: Download weights (time-boxed)
         timeout-minutes: 15
         run: |
@@ -60,6 +62,13 @@ jobs:
         run: |
           cd flp
           uv run python "$GITHUB_WORKSPACE/services/presence/render_atlas.py" --flp . --out "$RUNNER_TEMP/atlas"
+          du -sh "$RUNNER_TEMP/atlas"/*
+      - name: Transparent background (BiRefNet on the GPU)
+        timeout-minutes: 20
+        run: |
+          cd flp
+          uv pip install -q torch torchvision transformers timm kornia einops
+          uv run python "$GITHUB_WORKSPACE/services/presence/matte_atlas.py" --atlas "$RUNNER_TEMP/atlas" ${BIREFNET_REVISION:+--revision "$BIREFNET_REVISION"}
           du -sh "$RUNNER_TEMP/atlas"/*
       - name: Print atlas to the log (base64 tar)
         run: |
