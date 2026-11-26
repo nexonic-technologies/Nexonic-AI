@@ -188,6 +188,10 @@ button:disabled { cursor: default; }
 [data-theme="light"] .add input { background: var(--bg); }
 .add button { width: 34px; display: grid; place-items: center; border-radius: 8px; background: var(--surface-card); }
 .empty { color: var(--text-muted); }
+.mem-list .mem-tag { flex: none; padding: 2px 6px; border-radius: 5px; font: 500 10px/1.2 var(--font-mono); text-transform: uppercase; border: 1px solid var(--line-strong); color: var(--text-muted); }
+.mem-list .mem-tag.sharee { color: var(--sharee); border-color: rgb(var(--sharee-rgb) / 0.4); }
+.mem-list .mem-tag.nexa { color: var(--nexa); border-color: rgb(var(--nexa-rgb) / 0.4); }
+.mem-list .mem-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .empty-state { display: grid; gap: 8px; align-content: center; flex: 1; text-align: center; color: var(--text-muted); padding: 0 8px; }
 .empty-state p { color: var(--text); font: 400 14px/1.45 var(--font-sans); }
 .empty-state small { font: 400 12px/1.45 var(--font-sans); color: var(--text-faint); }

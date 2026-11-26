@@ -3,7 +3,7 @@ import { presenceLabel, type MotionLevel, type PresenceState, type Theme } from 
 import { Icon, type IconName } from "./components/Icon";
 import { NeuralCore } from "./components/NeuralCore";
 import { CountUp, RollText, ScrambleText, SplitText, useCycle } from "./components/MotionText";
-import { capabilityLabel, formatBytes, inDesktop, ipc, type Capability, type PermissionsView, type SystemInfo } from "./lib/ipc";
+import { capabilityLabel, formatBytes, inDesktop, ipc, type Capability, type MemorySummary, type MemoryView, type PermissionsView, type SystemInfo } from "./lib/ipc";
 import { usePersisted, useReducedMotion } from "./lib/store";
 import shareeImg from "./assets/characters/sharee.webp";
 import nexaImg from "./assets/characters/nexa.webp";
@@ -54,7 +54,25 @@ export function App() {
   const [palette, setPalette] = useState(false);
   const [sys, setSys] = useState<SystemInfo | null>(null);
   const [perms, setPerms] = useState<PermissionsView | null>(null);
-  const [memoryCount, setMemoryCount] = useState<number | null>(null);
+  const [memoryInfo, setMemoryInfo] = useState<MemorySummary | null>(null);
+  const [memories, setMemories] = useState<MemoryView[]>([]);
+
+  const nodes = useMemo(
+    () =>
+      NODES.map((n) =>
+        n.id === "Memory"
+          ? {
+              ...n,
+              status: memoryInfo?.persistent
+                ? "Isolation active · encrypted SQLite (Keychain)"
+                : inDesktop()
+                  ? "Isolation active · encrypted SQLite"
+                  : "Browser preview · desktop storage unavailable",
+            }
+          : n,
+      ),
+    [memoryInfo],
+  );
 
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
   usePointerLight(reduced);
@@ -74,7 +92,10 @@ export function App() {
   useEffect(() => {
     void ipc.systemInfo().then(setSys);
     void ipc.permissions().then(setPerms);
-    void ipc.memorySummary().then((m) => setMemoryCount(m?.userVisible ?? null));
+    void ipc.memorySummary().then(setMemoryInfo);
+    void ipc.memoriesRecent(12).then((items) => {
+      if (items) setMemories(items);
+    });
   }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -133,14 +154,25 @@ export function App() {
             <div key={`${mode}-${p}`} className="panel-slot">
               {p === "focus" && <FocusPanel />}
               {p === "collab" && <CollabPanel />}
-              {p === "memory" && <MemoryPanel count={memoryCount} />}
+              {p === "memory" && (
+                <MemoryPanel
+                  info={memoryInfo}
+                  memories={memories}
+                  onForget={(id) => {
+                    void ipc.forgetMemory(id).then(() => {
+                      setMemories((cur) => cur.filter((x) => x.id !== id));
+                      void ipc.memorySummary().then(setMemoryInfo);
+                    });
+                  }}
+                />
+              )}
               {p === "awareness" && <AwarenessPanel perms={perms} setPerms={setPerms} sys={sys} />}
             </div>
           ))}
         </section>
         <Dock />
       </main>
-      {node && <Inspector node={NODES.find((n) => n.id === node)!} onClose={() => setNode(null)} />}
+      {node && <Inspector node={nodes.find((n) => n.id === node)!} onClose={() => setNode(null)} />}
       {palette && <CommandPalette onClose={() => setPalette(false)} onSection={(s) => { setSection(s); setPalette(false); }} onMode={(m) => { setMode(m); setPalette(false); }} />}
       {!inDesktop() && <div className="preview-badge">Browser preview · desktop services unavailable</div>}
     </div>
@@ -278,13 +310,64 @@ function Panel({ icon, title, meta, children }: { icon: IconName; title: string;
 }
 
 function FocusPanel() {
-  const [tasks, setTasks] = usePersisted<Task[]>("focus", []);
+  const [browserTasks, setBrowserTasks] = usePersisted<Task[]>("focus", []);
+  const [desktopTasks, setDesktopTasks] = useState<Task[]>([]);
   const [draft, setDraft] = useState("");
+  const desktop = inDesktop();
+  const tasks = desktop ? desktopTasks : browserTasks;
+
+  useEffect(() => {
+    if (!desktop) return;
+    let active = true;
+    void ipc.kvGet("focus").then((raw) => {
+      if (!active) return;
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as Task[];
+          if (Array.isArray(parsed)) {
+            setDesktopTasks(parsed);
+            return;
+          }
+        } catch {
+          /* ignore malformed stored value */
+        }
+      }
+      // One-time migration from legacy unencrypted localStorage into encrypted SQLite kv.
+      try {
+        const legacy = localStorage.getItem("nexonic:focus");
+        if (legacy) {
+          const parsed = JSON.parse(legacy) as Task[];
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setDesktopTasks(parsed);
+            void ipc.kvSet("focus", JSON.stringify(parsed)).then(() => {
+              localStorage.removeItem("nexonic:focus");
+            });
+          }
+        }
+      } catch {
+        /* localStorage unavailable */
+      }
+    });
+    return () => { active = false; };
+  }, [desktop]);
+
+  const updateTasks = (updater: (prev: Task[]) => Task[]) => {
+    if (!desktop) {
+      setBrowserTasks(updater);
+      return;
+    }
+    setDesktopTasks((prev) => {
+      const next = updater(prev);
+      void ipc.kvSet("focus", JSON.stringify(next));
+      return next;
+    });
+  };
+
   const done = tasks.filter((t) => t.done).length;
   const add = () => {
     const text = draft.trim();
     if (!text) return;
-    setTasks((t) => [...t, { id: crypto.randomUUID(), text, done: false }]);
+    updateTasks((t) => [...t, { id: crypto.randomUUID(), text, done: false }]);
     setDraft("");
   };
   return (
@@ -294,10 +377,10 @@ function FocusPanel() {
         {tasks.map((t) => (
           <li key={t.id}>
             <label>
-              <input type="checkbox" checked={t.done} onChange={() => setTasks((all) => all.map((x) => x.id === t.id ? { ...x, done: !x.done } : x))} />
+              <input type="checkbox" checked={t.done} onChange={() => updateTasks((all) => all.map((x) => x.id === t.id ? { ...x, done: !x.done } : x))} />
               <span>{t.text}</span>
             </label>
-            <button className="ghost" aria-label={`Remove ${t.text}`} onClick={() => setTasks((all) => all.filter((x) => x.id !== t.id))}><Icon name="x" size={14} /></button>
+            <button className="ghost" aria-label={`Remove ${t.text}`} onClick={() => updateTasks((all) => all.filter((x) => x.id !== t.id))}><Icon name="x" size={14} /></button>
           </li>
         ))}
       </ul>
@@ -322,13 +405,36 @@ function CollabPanel() {
   );
 }
 
-function MemoryPanel({ count }: { count: number | null }) {
+function MemoryPanel({
+  info,
+  memories,
+  onForget,
+}: {
+  info: MemorySummary | null;
+  memories: MemoryView[];
+  onForget: (id: number) => void;
+}) {
+  const count = info?.userVisible ?? null;
   return (
     <Panel icon="memory" title="Recent Memory Events" meta={count === null ? "—" : <><CountUp value={count} />&nbsp;stored</>}>
-      <div className="empty-state">
-        <p>{count === null ? "Memory engine not reachable in this preview." : "No memories yet."}</p>
-        <small>Private memories for Sharee and Nexa stay separate from shared memory. You can review, correct or delete anything.</small>
-      </div>
+      {memories.length > 0 ? (
+        <ul className="tasks mem-list">
+          {memories.map((m) => (
+            <li key={m.id}>
+              <span className={`mem-tag ${m.domain}`}>{m.domain}</span>
+              <span className="mem-text" title={m.text}>{m.text}</span>
+              <button className="ghost" aria-label={`Forget memory ${m.id}`} onClick={() => onForget(m.id)}>
+                <Icon name="x" size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="empty-state">
+          <p>{count === null ? "Memory engine not reachable in this preview." : info?.persistent ? "No memories yet · encrypted SQLite active." : "No memories yet."}</p>
+          <small>Private memories for Sharee and Nexa stay separate from shared memory. You can review, correct or delete anything.</small>
+        </div>
+      )}
     </Panel>
   );
 }
