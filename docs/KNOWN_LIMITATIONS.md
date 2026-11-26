@@ -9,4 +9,7 @@
 | Hardware not yet measured | Status | No performance or memory figures are claimed | Benchmarks on the owner's MacBook Pro M5 |
 | Developer ID signing / notarization | Blocker (later) | Only unsigned/ad-hoc builds possible | Apple Developer credentials as repository secrets |
 | Final photorealistic character assets | Blocker (later) | Digital-human renderer will be tested with licensed development assets | Commissioned or licensed character assets |
+| MuseTalk-MLX licence file | Check | The pinned `xocialize/musetalk-mlx` port is described as MIT, but the licence file still has to be confirmed before anything ships with it (upstream MuseTalk weights are MIT) | Confirm the licence file at the pinned commit |
+| Encrypted storage can fail to open | Handled | If the Keychain refuses or the key does not match, the app starts on a temporary in-memory store, says so in the Memory node and panel, and never touches the existing database | Owner checks the Keychain entry `com.nexonictechnologies.ai / memory-db-key` |
+| Update check | Opt-in | Checking GitHub for a newer release is off by default; when on, it runs off the main thread and only reports a strictly higher version | — |
 | Memory engine ready, agents not yet writing to it | Status | Encrypted SQLite + Keychain key + `Today's Focus` `kv` storage are wired in `AppState`; memories stay empty until agent runtimes (M16) or UI entry create them | M16 agent runtimes |

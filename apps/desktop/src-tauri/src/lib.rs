@@ -21,6 +21,9 @@ pub struct AppState {
     permissions: Mutex<Permissions>,
     memory: Mutex<PersistentMemory>,
     persistent: bool,
+    /// Why the encrypted on-disk store could not be opened, if it failed.
+    /// The app then runs on a temporary in-memory store and says so.
+    storage_error: Option<String>,
 }
 
 impl AppState {
@@ -30,6 +33,7 @@ impl AppState {
             permissions: Mutex::new(Permissions::new()),
             memory: Mutex::new(mem),
             persistent: true,
+            storage_error: None,
         })
     }
 
@@ -40,7 +44,32 @@ impl AppState {
             permissions: Mutex::new(Permissions::new()),
             memory: Mutex::new(mem),
             persistent: false,
+            storage_error: None,
         })
+    }
+
+    /// Opens the encrypted store; if the Keychain or the database refuses
+    /// (denied Keychain prompt, missing key for an existing database, …) the
+    /// app still starts on a temporary in-memory store instead of crashing.
+    /// The existing database file is never modified or replaced.
+    pub fn open_or_fallback(path: &Path) -> Self {
+        let opened =
+            keychain::load_or_create_key().and_then(|key| Self::open_persistent(path, &key));
+        match opened {
+            Ok(st) => st,
+            Err(err) => {
+                eprintln!("[nexonic] encrypted memory unavailable, using a temporary store: {err}");
+                let key = generate_key();
+                let mem = PersistentMemory::open_in_memory(&key)
+                    .expect("in-memory store cannot fail to open");
+                Self {
+                    permissions: Mutex::new(Permissions::new()),
+                    memory: Mutex::new(mem),
+                    persistent: false,
+                    storage_error: Some(err),
+                }
+            }
+        }
     }
 }
 
@@ -171,6 +200,7 @@ pub struct MemorySummary {
     pub user_visible: usize,
     pub encrypted: bool,
     pub persistent: bool,
+    pub storage_error: Option<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -265,6 +295,7 @@ fn memory_summary(state: State<'_, AppState>) -> Result<MemorySummary, String> {
         user_visible: m.context_for(Reader::User).len(),
         encrypted: true,
         persistent: state.persistent,
+        storage_error: state.storage_error.clone(),
     })
 }
 
@@ -352,6 +383,31 @@ pub struct UpdateStatus {
     pub message: String,
 }
 
+/// True only when `latest` is a strictly higher version than `current`
+/// (numeric major.minor.patch; pre-release suffixes are ignored).
+fn is_newer(latest: &str, current: &str) -> bool {
+    fn parts(v: &str) -> Vec<u64> {
+        v.trim_start_matches('v')
+            .split(['-', '+'])
+            .next()
+            .unwrap_or("")
+            .split('.')
+            .map(|p| p.parse().unwrap_or(0))
+            .collect()
+    }
+    let (a, b) = (parts(latest), parts(current));
+    for i in 0..a.len().max(b.len()) {
+        let (x, y) = (
+            a.get(i).copied().unwrap_or(0),
+            b.get(i).copied().unwrap_or(0),
+        );
+        if x != y {
+            return x > y;
+        }
+    }
+    false
+}
+
 fn parse_release_json(body: &str, current: &str) -> UpdateStatus {
     let release_default = "https://github.com/nexonic-technologies/Nexonic-AI/releases".to_string();
     let website = "https://nexonictechnologies.com/".to_string();
@@ -364,7 +420,7 @@ fn parse_release_json(body: &str, current: &str) -> UpdateStatus {
                 .and_then(|u| u.as_str())
                 .unwrap_or(&release_default)
                 .to_string();
-            let newer = latest != current;
+            let newer = is_newer(&latest, current);
             let message = if newer {
                 format!("Update available: v{latest} (current v{current})")
             } else {
@@ -390,8 +446,15 @@ fn parse_release_json(body: &str, current: &str) -> UpdateStatus {
     }
 }
 
+/// Runs on a worker thread so the window never freezes while GitHub answers.
 #[tauri::command]
-fn check_updates() -> UpdateStatus {
+async fn check_updates() -> UpdateStatus {
+    tauri::async_runtime::spawn_blocking(fetch_update_status)
+        .await
+        .unwrap_or_else(|_| parse_release_json("{}", env!("CARGO_PKG_VERSION")))
+}
+
+fn fetch_update_status() -> UpdateStatus {
     let current = env!("CARGO_PKG_VERSION");
     let out = std::process::Command::new("curl")
         .args([
@@ -420,9 +483,7 @@ pub fn run() {
                 .app_data_dir()
                 .map_err(|e| format!("failed to locate app data directory: {e}"))?;
             std::fs::create_dir_all(&dir)?;
-            let key = keychain::load_or_create_key()?;
-            let state = AppState::open_persistent(&dir.join("memory.sqlite"), &key)?;
-            app.manage(state);
+            app.manage(AppState::open_or_fallback(&dir.join("memory.sqlite")));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -547,6 +608,13 @@ mod tests {
         );
         assert!(up.update_available);
         assert_eq!(up.latest_version.as_deref(), Some("0.2.0"));
+
+        let older = parse_release_json(r#"{"tag_name":"v0.0.9"}"#, "0.1.0");
+        assert!(!older.update_available, "an older release is not an update");
+        let same = parse_release_json(r#"{"tag_name":"v0.1.0"}"#, "0.1.0");
+        assert!(!same.update_available);
+        assert!(is_newer("0.10.0", "0.9.9"));
+        assert!(!is_newer("1.0.0-beta", "1.0.0"));
 
         let dev = parse_release_json("{}", "0.1.0");
         assert!(!dev.update_available);

@@ -563,4 +563,6 @@ html[data-theme="light"] .stage .modes { margin-bottom: var(--sp-2); }
 @media (max-height: 860px) {
   .panel { height: 224px; padding: 13px 15px; gap: 9px; }
   .talk-wrap, .quick { padding: 9px 12px; }
+  .aware li { padding: 2.5px 2px; }
+  .aware .local { margin-top: 2px; padding-top: 5px; }
 }

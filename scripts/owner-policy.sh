@@ -38,6 +38,16 @@ case "${1:-}" in
     base="$2"; head="$3"; bad=0
     if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
       revs="$(git rev-list "$head")"
+    elif ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+      # The branch was rewritten (force-push): the old tip no longer exists.
+      # Check every commit on the branch that is not already on main.
+      main_ref="$(git rev-parse -q --verify origin/main || git rev-parse -q --verify main || true)"
+      if [ -n "$main_ref" ]; then
+        echo "owner-policy: previous tip $base is gone (rewritten branch); checking commits not on main." >&2
+        revs="$(git rev-list "$main_ref..$head")"
+      else
+        revs="$(git rev-list "$head")"
+      fi
     else
       revs="$(git rev-list "$base..$head")"
     fi

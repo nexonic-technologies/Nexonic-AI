@@ -42,3 +42,4 @@ AGENTS.md
 .DS_Store
 apps/desktop/src-tauri/gen/
 TEAM-NOTES.md
+__pycache__/
