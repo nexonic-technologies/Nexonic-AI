@@ -33,7 +33,7 @@ jobs:
   atlas:
     name: Live-portrait atlas (Apple Silicon)
     runs-on: macos-latest
-    timeout-minutes: 75
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tools
@@ -63,13 +63,13 @@ jobs:
           cd flp
           uv run python "$GITHUB_WORKSPACE/services/presence/render_atlas.py" --flp . --out "$RUNNER_TEMP/atlas"
           du -sh "$RUNNER_TEMP/atlas"/*
-      - name: Transparent background (BiRefNet on the GPU)
-        timeout-minutes: 40
+      - name: Transparent background (BiRefNet)
+        timeout-minutes: 60
         run: |
           # own environment: the LivePortrait env pins its own torch stack
           uv venv -q --python 3.12 "$RUNNER_TEMP/matte-env"
           uv pip install -q --python "$RUNNER_TEMP/matte-env/bin/python" torch torchvision transformers timm kornia einops huggingface_hub pillow numpy
-          "$RUNNER_TEMP/matte-env/bin/python" "$GITHUB_WORKSPACE/services/presence/matte_atlas.py" --atlas "$RUNNER_TEMP/atlas" --revision "$BIREFNET_REVISION"
+          "$RUNNER_TEMP/matte-env/bin/python" "$GITHUB_WORKSPACE/services/presence/matte_atlas.py" --atlas "$RUNNER_TEMP/atlas" --revision "$BIREFNET_REVISION" --size 768
           du -sh "$RUNNER_TEMP/atlas"/*
       - name: Print atlas to the log (base64 tar)
         run: |

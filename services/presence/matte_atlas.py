@@ -1,7 +1,7 @@
 """Cut Sharee and Nexa out of their background in every atlas frame.
 
 Runs BiRefNet (MIT, ZhengPeng7/BiRefNet-portrait) on the Apple Silicon GPU
-(MPS) and rewrites each frame as a WebP with an alpha channel, so the
+(MPS) when available, otherwise on the CPU and rewrites each frame as a WebP with an alpha channel, so the
 characters float on the presence stage instead of sitting in a dark box.
 Each head pose and expression gets its own matte, so the cut-out follows every
 head turn; the half-closed and closed-lid frames reuse the matte of their
