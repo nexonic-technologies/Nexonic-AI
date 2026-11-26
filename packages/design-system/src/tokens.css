@@ -2,9 +2,9 @@
 
 :root {
   /* Type */
-  --font-sans: "Inter Variable", "SF Pro Text", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-display: "Inter Variable", "SF Pro Display", -apple-system, system-ui, sans-serif;
-  --font-mono: "SF Mono", ui-monospace, Menlo, monospace;
+  --font-sans: "Geist Variable", "SF Pro Text", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-display: "Sora Variable", "SF Pro Display", -apple-system, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "SF Mono", ui-monospace, Menlo, monospace;
   --text-h1: 600 48px/1.08 var(--font-display);
   --text-h2: 600 36px/1.12 var(--font-display);
   --text-h3: 600 28px/1.18 var(--font-display);

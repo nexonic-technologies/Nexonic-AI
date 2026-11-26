@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { presenceLabel, type MotionLevel, type PresenceState, type Theme } from "@nexonic/design-system";
 import { Icon, type IconName } from "./components/Icon";
 import { NeuralCore } from "./components/NeuralCore";
+import { CountUp, RollText, ScrambleText, SplitText, useCycle } from "./components/MotionText";
 import { capabilityLabel, formatBytes, inDesktop, ipc, type Capability, type PermissionsView, type SystemInfo } from "./lib/ipc";
 import { usePersisted, useReducedMotion } from "./lib/store";
 import shareeImg from "./assets/characters/sharee.webp";
@@ -105,10 +106,10 @@ export function App() {
             </svg>
             <div className="core-label">
               <Icon name="wave" size={26} />
-              <strong>Collective<br />Intelligence</strong>
-              <span><i className="c-sharee">Sharee</i> × Nexa</span>
+              <strong><SplitText text="COLLECTIVE" delay={300} stagger={30} /><SplitText text="INTELLIGENCE" delay={420} stagger={30} /></strong>
+              <span><ScrambleText text="SHAREE" delay={700} className="c-sharee" /> × <ScrambleText text="NEXA" delay={760} /></span>
               <b className="inf">∞</b>
-              <em>Idle</em>
+              <em><RollText value="IDLE" /></em>
             </div>
             {NODES.map((n) => (
               <button key={n.id} className={`node ${n.pos}`} onClick={() => setNode(n.id)} aria-pressed={node === n.id}
@@ -225,11 +226,13 @@ function Header({ onSearch, theme, onTheme }: { onSearch: () => void; theme: The
     <header className="header">
       <div className="brand">
         <Mark />
-        <div><b>NEXONIC</b><span>AI</span></div>
+        <div><SplitText as="b" text="NEXONIC" delay={60} stagger={40} /><span>INTELLIGENCE</span></div>
       </div>
       <div className="title">
-        <h1>My Intelligence Environment</h1>
-        <p>Two Minds <i>·</i> One Collective Intelligence <i>·</i> Built Around You</p>
+        <SplitText as="h1" text="My Intelligence Environment" delay={180} stagger={14} />
+        <p>{["Two Minds", "One Collective Intelligence", "Built Around You"].map((w, i) => (
+          <span key={w} className="tag-word" style={{ animationDelay: `${520 + i * 140}ms` }}>{i > 0 && <i>·</i>}{w}</span>
+        ))}</p>
       </div>
       <button className="search" onClick={onSearch}>
         <Icon name="search" /> <span>Search memories, files, tasks…</span> <kbd>⌘ K</kbd>
@@ -251,8 +254,8 @@ function Presence({ name, side, state }: { name: "Sharee" | "Nexa"; side: "left"
       <div className="aura" />
       <img className="portrait" src={name === "Sharee" ? shareeImg : nexaImg} alt={`${name} portrait`} draggable={false} />
       <div className="who">
-        <h2>{name.toUpperCase()}</h2>
-        <p><span className={`dot ${state === "offline" ? "off" : "on"}`} />{state === "offline" ? "Standby" : presenceLabel[state]} <i>·</i> {state === "offline" ? "No model connected" : "Live"}</p>
+        <SplitText as="h2" className="agent-name" text={name.toUpperCase()} delay={side === "left" ? 620 : 720} stagger={55} />
+        <p className="agent-status"><span className={`dot ${state === "offline" ? "off" : "on"}`} /><RollText value={state === "offline" ? "Standby" : presenceLabel[state]} /><i>·</i><ScrambleText text={state === "offline" ? "NO MODEL CONNECTED" : "LIVE"} delay={900} className="mono" /></p>
         <div className="voice">
           {side === "left" && <button className="mic-sm" disabled aria-label={`${name} voice (microphone off)`}><Icon name="mic" size={16} /></button>}
           <div className="wave" data-live={state === "speaking" || state === "listening"} aria-hidden="true">
@@ -268,7 +271,7 @@ function Presence({ name, side, state }: { name: "Sharee" | "Nexa"; side: "left"
 function Panel({ icon, title, meta, children }: { icon: IconName; title: string; meta?: ReactNode; children: ReactNode }) {
   return (
     <article className="panel" data-spot>
-      <header><Icon name={icon} /><h3>{title}</h3>{meta && <span className="meta">{meta}</span>}</header>
+      <header><Icon name={icon} /><SplitText as="h3" text={title} delay={560} stagger={12} />{meta && <span className="meta">{meta}</span>}</header>
       {children}
     </article>
   );
@@ -285,7 +288,7 @@ function FocusPanel() {
     setDraft("");
   };
   return (
-    <Panel icon="target" title="Today's Focus" meta={tasks.length ? `${done} of ${tasks.length} completed` : undefined}>
+    <Panel icon="target" title="Today's Focus" meta={tasks.length ? <><CountUp value={done} />&nbsp;of&nbsp;<CountUp value={tasks.length} />&nbsp;completed</> : undefined}>
       {tasks.length > 0 && <div className="progress"><i style={{ width: `${(done / tasks.length) * 100}%` }} /></div>}
       <ul className="tasks">
         {tasks.map((t) => (
@@ -321,7 +324,7 @@ function CollabPanel() {
 
 function MemoryPanel({ count }: { count: number | null }) {
   return (
-    <Panel icon="memory" title="Recent Memory Events" meta={count === null ? "—" : `${count} stored`}>
+    <Panel icon="memory" title="Recent Memory Events" meta={count === null ? "—" : <><CountUp value={count} />&nbsp;stored</>}>
       <div className="empty-state">
         <p>{count === null ? "Memory engine not reachable in this preview." : "No memories yet."}</p>
         <small>Private memories for Sharee and Nexa stay separate from shared memory. You can review, correct or delete anything.</small>
@@ -365,12 +368,16 @@ function AwarenessPanel({ perms, setPerms, sys }: { perms: PermissionsView | nul
 function Dock() {
   const [text, setText] = useState("");
   const [note, setNote] = useState<string | null>(null);
+  const hint = useCycle(["Talk to Sharee, Nexa, or both…", "Ask Nexa to plan your morning…", "Ask Sharee to review your project…", "Ask both to debate an idea…"], 4200);
   return (
     <footer className="dock">
       <div className="talk-wrap">
         <form className="talk" onSubmit={(e) => { e.preventDefault(); if (text.trim()) setNote("Connect a model provider in Intelligence to talk to Sharee and Nexa."); }}>
           <Icon name="wave" size={24} />
-          <input value={text} onChange={(e) => { setText(e.target.value); setNote(null); }} placeholder="Talk to Sharee, Nexa, or both…" aria-label="Message" />
+          <span className="talk-field">
+            <input value={text} onChange={(e) => { setText(e.target.value); setNote(null); }} aria-label="Message to Sharee and Nexa" />
+            {!text && <span className="talk-hint" aria-hidden="true"><RollText value={hint} /></span>}
+          </span>
           <button type="button" className="mic" aria-label="Voice (microphone permission off)" disabled><Icon name="mic" size={22} /></button>
         </form>
         <button className="focus-btn" disabled aria-label="Point at something on screen (arrives with screen awareness)"><Icon name="crosshair" size={22} /></button>
