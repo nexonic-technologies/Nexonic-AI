@@ -202,8 +202,24 @@ export function LiveFace({
         ctx.globalAlpha = t * t * (3 - 2 * t);
       }
       ctx.drawImage(cur, drawBox.x, drawBox.y, w, h);
-      ctx.restore();
+      // dissolve the frame edges (the source portrait cuts the shoulders straight)
       ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "destination-in";
+      const side = ctx.createLinearGradient(drawBox.x, 0, drawBox.x + w, 0);
+      side.addColorStop(0, "rgba(0,0,0,0)");
+      side.addColorStop(0.12, "rgba(0,0,0,1)");
+      side.addColorStop(0.88, "rgba(0,0,0,1)");
+      side.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = side;
+      ctx.fillRect(drawBox.x, drawBox.y, w, h);
+      const foot = ctx.createLinearGradient(0, drawBox.y, 0, drawBox.y + h);
+      foot.addColorStop(0, "rgba(0,0,0,1)");
+      foot.addColorStop(0.7, "rgba(0,0,0,1)");
+      foot.addColorStop(0.98, "rgba(0,0,0,0)");
+      ctx.fillStyle = foot;
+      ctx.fillRect(drawBox.x, drawBox.y, w, h);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.restore();
     };
     raf = requestAnimationFrame(frame);
     return () => {
