@@ -29,7 +29,7 @@ Status: ✅ done · 🔶 in progress · ⛔ blocked · ⬜ pending
 | | Milestone | Status |
 |---|---|---|
 | M16 | Independent cognitive agent runtimes | ⬜ |
-| M17 | OpenRouter and BYOK providers | ⬜ |
+| M17 | OpenRouter and BYOK providers | 🔶 OpenRouter router, Keychain key, cooldown fallback, Intelligence UI |
 | M18 | Embedded local inference | ⬜ |
 | M19 | Multi-model routing | ⬜ |
 | M20 | Independent cognitive memory engines | 🔶 isolation + encrypted persistence done |

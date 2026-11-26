@@ -6,7 +6,7 @@ import { LiveFace, type FaceAtlas, type Gaze, type Mood } from "./components/Liv
 import { VideoFace, type ClipName, type ClipSet, type FaceBox } from "./components/VideoFace";
 import { MOOD_LABEL, TEMPERAMENT, usePresenceMood } from "./lib/presenceMood";
 import { CountUp, RollText, ScrambleText, SplitText, useCycle } from "./components/MotionText";
-import { capabilityLabel, formatBytes, inDesktop, ipc, type Capability, type MemorySummary, type MemoryView, type PermissionsView, type SystemInfo, type UpdateStatus } from "./lib/ipc";
+import { capabilityLabel, formatBytes, inDesktop, ipc, type Capability, type CompletionResult, type MemorySummary, type MemoryView, type PermissionsView, type ProviderStatus, type SystemInfo, type UpdateStatus } from "./lib/ipc";
 import { usePersisted, useReducedMotion } from "./lib/store";
 import shareeNeutral from "./assets/characters/sharee.webp";
 import nexaNeutral from "./assets/characters/nexa.webp";
@@ -137,6 +137,8 @@ export function App() {
   const [greetAt, setGreetAt] = useState<Record<Agent, number>>({ Sharee: 0, Nexa: 0 });
   const [palette, setPalette] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [providersOpen, setProvidersOpen] = useState(false);
+  const [providerInfo, setProviderInfo] = useState<ProviderStatus | null>(null);
   const [autoUpdate, setAutoUpdate] = usePersisted<boolean>("auto-update", false);
   const [updateInfo, setUpdateInfo] = useState<UpdateStatus | null>(null);
   const [sys, setSys] = useState<SystemInfo | null>(null);
@@ -185,6 +187,7 @@ export function App() {
     void ipc.memoriesRecent(12).then((items) => {
       if (items) setMemories(items);
     });
+    void ipc.providerStatus().then(setProviderInfo);
   }, []);
   useEffect(() => {
     if (!autoUpdate || !inDesktop()) return;
@@ -193,7 +196,7 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); }
-      if (e.key === "Escape") { setPalette(false); setNode(null); setAboutOpen(false); }
+      if (e.key === "Escape") { setPalette(false); setNode(null); setAboutOpen(false); setProvidersOpen(false); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -233,7 +236,7 @@ export function App() {
         theme={theme}
         onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
       />
-      <Sidebar section={section} onSection={(s) => { setSection(s); if (s === "settings") setAboutOpen(true); }} sys={sys} />
+      <Sidebar section={section} onSection={(s) => { setSection(s); if (s === "settings") setAboutOpen(true); if (s === "intelligence") setProvidersOpen(true); }} sys={sys} />
       <main className="main">
         <section className="stage" aria-label="Presence" data-theme="dark">
           <Presence
@@ -351,9 +354,16 @@ export function App() {
       {palette && (
         <CommandPalette
           onClose={() => setPalette(false)}
-          onSection={(s) => { setSection(s); setPalette(false); }}
+          onSection={(s) => { setSection(s); setPalette(false); if (s === "settings") setAboutOpen(true); if (s === "intelligence") setProvidersOpen(true); }}
           onMode={(m) => { setMode(m); setPalette(false); }}
           onAbout={() => { setPalette(false); setAboutOpen(true); }}
+        />
+      )}
+      {providersOpen && (
+        <ProvidersModal
+          status={providerInfo}
+          onStatus={setProviderInfo}
+          onClose={() => setProvidersOpen(false)}
         />
       )}
       {aboutOpen && (
@@ -892,6 +902,156 @@ function CommandPalette({
         <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Type a command…" aria-label="Command"
           onKeyDown={(e) => { if (e.key === "Enter" && items[0]) items[0].run(); }} />
         <ul>{items.map((i) => <li key={i.key}><button onClick={i.run}>{i.label}</button></li>)}</ul>
+      </div>
+    </div>
+  );
+}
+
+function ProvidersModal({
+  status,
+  onStatus,
+  onClose,
+}: {
+  status: ProviderStatus | null;
+  onStatus: (next: ProviderStatus) => void;
+  onClose: () => void;
+}) {
+  const desktop = inDesktop();
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [testReply, setTestReply] = useState<CompletionResult | null>(null);
+
+  const run = async (fn: () => Promise<ProviderStatus | null>) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const next = await fn();
+      if (next) onStatus(next);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="scrim" onClick={onClose}>
+      <div className="about-dialog providers-dialog" role="dialog" aria-label="Intelligence providers and model router" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <Icon name="intelligence" size={22} />
+          <div>
+            <h3>Intelligence · OpenRouter</h3>
+            <small>
+              {!desktop
+                ? "Browser preview · launch desktop app for macOS Keychain"
+                : status?.hasKey
+                  ? `Connected · Keychain (${status.keyHint ?? "saved"})`
+                  : "Not configured · stored in macOS Keychain only"}
+            </small>
+          </div>
+          <button className="ghost" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
+        </header>
+
+        <form
+          className="provider-key-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!desktop || !apiKeyDraft.trim()) return;
+            void run(async () => {
+              const next = await ipc.saveProviderKey(apiKeyDraft);
+              if (next) setApiKeyDraft("");
+              return next;
+            });
+          }}
+        >
+          <input
+            type="password"
+            value={apiKeyDraft}
+            disabled={!desktop || busy}
+            onChange={(e) => setApiKeyDraft(e.target.value)}
+            placeholder={desktop ? "Paste OpenRouter API key (sk-or-…)" : "Desktop Keychain required"}
+            aria-label="OpenRouter API key"
+          />
+          <button type="submit" className="secondary" disabled={!desktop || busy || !apiKeyDraft.trim()}>
+            Save to Keychain
+          </button>
+          {desktop && status?.hasKey && (
+            <button type="button" className="secondary" disabled={busy} onClick={() => void run(() => ipc.clearProviderKey())}>
+              Clear Key
+            </button>
+          )}
+        </form>
+
+        <dl className="about-meta">
+          <dt>Routing Policy</dt>
+          <dd>
+            <label className="auto-chk">
+              <input
+                type="checkbox"
+                checked={status?.allowPaid ?? false}
+                disabled={!desktop || busy}
+                onChange={(e) => void run(() => ipc.setRouterPolicy(e.target.checked, status?.preferredModel ?? null))}
+              />
+              <span>Allow paid models (off by default — free pool first)</span>
+            </label>
+          </dd>
+          <dt>Catalogue</dt>
+          <dd className="cat-row">
+            <span>{status ? `${status.freeCount} free · ${status.totalCount} total · ${status.cooldownCount} on cooldown` : "4 built-in free fallbacks"}</span>
+            <button type="button" className="secondary" disabled={!desktop || busy} onClick={() => void run(() => ipc.refreshModels())}>
+              <Icon name="refresh" size={14} />Refresh
+            </button>
+          </dd>
+          <dt>Preferred</dt>
+          <dd>
+            <select
+              className="model-select"
+              disabled={!desktop || busy}
+              value={status?.preferredModel ?? ""}
+              onChange={(e) => void run(() => ipc.setRouterPolicy(status?.allowPaid ?? false, e.target.value || null))}
+              aria-label="Preferred OpenRouter model"
+            >
+              <option value="">Auto (free pool + 429 cooldown fallback)</option>
+              {(status?.models ?? []).map((m) => (
+                <option key={m.id} value={m.id}>{m.isFree ? `[Free] ${m.id}` : m.id}</option>
+              ))}
+            </select>
+          </dd>
+        </dl>
+
+        <div className="about-updates">
+          <div>
+            <b>Router Check (M17)</b>
+            <small>
+              {err
+                ? err
+                : testReply
+                  ? `${testReply.model} (${testReply.attempts} attempt${testReply.attempts === 1 ? "" : "s"}): ${testReply.content}`
+                  : "Free models stay default; 429 rate limits automatically cool down and fail over."}
+            </small>
+          </div>
+          <button
+            type="button"
+            className="secondary"
+            disabled={!desktop || busy || !status?.hasKey}
+            onClick={async () => {
+              setBusy(true);
+              setErr(null);
+              setTestReply(null);
+              try {
+                const res = await ipc.testCompletion("Reply with OK in three words or fewer.");
+                if (res) setTestReply(res);
+              } catch (e) {
+                setErr(e instanceof Error ? e.message : String(e));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Test Router
+          </button>
+        </div>
       </div>
     </div>
   );
