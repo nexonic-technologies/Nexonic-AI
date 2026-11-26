@@ -281,11 +281,11 @@ button:disabled { cursor: default; }
 
 .core-label {
   position: relative; display: grid; justify-items: center; gap: 6px; width: 148px; height: 148px; align-content: center; text-align: center;
-  border-radius: 50%; background: radial-gradient(closest-side, #0b0f14 74%, rgb(11 15 20 / 0.65) 90%, transparent);
-  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.08), 0 0 36px -12px rgb(var(--sharee-rgb) / 0.35);
+  border-radius: 50%; background: radial-gradient(closest-side, rgb(5 8 12 / 0.38), rgb(5 8 12 / 0.12) 70%, transparent);
+  text-shadow: 0 0 8px rgb(0 0 0 / 0.9), 0 0 2px rgb(0 0 0 / 0.9);
   cursor: pointer; transition: transform 320ms var(--spring), box-shadow 320ms var(--ease-out);
 }
-.core-label:hover { transform: scale(1.04); box-shadow: 0 0 0 1px rgb(var(--sharee-rgb) / 0.35), 0 0 42px -10px rgb(var(--sharee-rgb) / 0.55); }
+.core-label:hover { transform: scale(1.03); }
 .core-label strong { display: grid; gap: 2px; font: 500 12.5px/1.1 var(--font-display); letter-spacing: 0.2em; text-transform: uppercase; }
 .core-label span { font: 500 9px/1 var(--font-mono); letter-spacing: 0.18em; text-transform: uppercase; color: var(--text); }
 .core-label .inf { font: 500 16px/1 var(--font-sans); color: var(--sharee); }
@@ -584,3 +584,9 @@ html[data-theme="light"] .stage .modes { margin-bottom: var(--sp-2); }
 .stage[data-dragging] * { user-select: none; }
 .stage button, .stage .presence { cursor: pointer; }
 .stage .core-label { cursor: grab; }
+
+/* Draggable cognitive nodes */
+.node { touch-action: none; cursor: grab; }
+.node:active { cursor: grabbing; }
+.node.moved { transform: translate(-50%, -50%); }
+.node.moved:hover, .node.moved[aria-pressed="true"] { transform: translate(-50%, -50%) scale(1.04); }

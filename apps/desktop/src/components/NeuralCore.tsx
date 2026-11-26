@@ -27,11 +27,11 @@ export const NODE_ANGLES: Record<string, number> = {
   Sharee: Math.PI, Nexa: 0,
 };
 
-const BUDGET: Record<MotionLevel, { lines: number; seg: number; spikes: number; dust: number }> = {
-  off: { lines: 0, seg: 0, spikes: 0, dust: 0 },
-  minimal: { lines: 260, seg: 48, spikes: 500, dust: 600 },
-  balanced: { lines: 620, seg: 64, spikes: 1100, dust: 1500 },
-  cinematic: { lines: 1100, seg: 80, spikes: 1800, dust: 2600 },
+const BUDGET: Record<MotionLevel, { lines: number; seg: number; spikes: number; dust: number; nucleus: number }> = {
+  off: { lines: 0, seg: 0, spikes: 0, dust: 0, nucleus: 0 },
+  minimal: { lines: 260, seg: 48, spikes: 500, dust: 600, nucleus: 1400 },
+  balanced: { lines: 620, seg: 64, spikes: 1100, dust: 1500, nucleus: 3200 },
+  cinematic: { lines: 1100, seg: 80, spikes: 1800, dust: 2600, nucleus: 5200 },
 };
 
 const R = 1.72; // major radius
@@ -298,6 +298,53 @@ export function NeuralCore({
     });
     rig.add(new THREE.Points(dustGeo, dustMat));
 
+    // ---------- Nucleus: a living sphere of particles fills the centre ----------
+    const nCount = B.nucleus;
+    const nSeed = new Float32Array(nCount * 4);
+    for (let i = 0; i < nCount; i++) {
+      // fibonacci sphere directions, radius biased toward the shell
+      const k = i + 0.5;
+      const phi = Math.acos(1 - (2 * k) / nCount);
+      const th = Math.PI * (1 + Math.sqrt(5)) * k;
+      nSeed.set([th, phi, Math.pow(Math.random(), 0.45), Math.random()], i * 4);
+    }
+    const nucGeo = new THREE.BufferGeometry();
+    nucGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(nCount * 3), 3));
+    nucGeo.setAttribute("aSeed", new THREE.BufferAttribute(nSeed, 4));
+    const nucMat = new THREE.ShaderMaterial({
+      uniforms: shared,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexShader: /* glsl */ `
+        ${bandGLSL}
+        uniform float uPixel;
+        attribute vec4 aSeed;
+        varying vec3 vCol; varying float vA;
+        void main(){
+          float t = uTime * (0.12 + aSeed.w * 0.18) * (1.0 + uActivity * 1.5);
+          float th = aSeed.x + t;
+          float ph = aSeed.y + sin(t * 0.7 + aSeed.w * 6.28) * 0.35;
+          float rad = ${(R - r * 1.05).toFixed(2)} * (0.18 + 0.82 * aSeed.z) * (1.0 + 0.06 * sin(uTime * 1.3 + aSeed.w * 20.0));
+          vec3 p = rad * vec3(sin(ph) * cos(th), sin(ph) * sin(th), cos(ph) * 0.55);
+          // flowing streams: particles drift along slow swirling currents
+          p.xy += 0.08 * vec2(sin(p.y * 3.0 + uTime * 0.8), cos(p.x * 3.0 - uTime * 0.7));
+          float g;
+          p += field(p, g) * 1.2;
+          vec2 b = bands(atan(p.y, p.x));
+          float core = 1.0 - aSeed.z;
+          vCol = mix(tint(b), vec3(0.85, 0.92, 1.0), core * 0.5) + vec3(0.3, 0.4, 0.55) * g;
+          vA = (0.22 + 0.5 * (b.x + b.y) * aSeed.z + 0.6 * core * core + g) * (0.35 + aSeed.w * 0.65);
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          gl_PointSize = (0.9 + aSeed.w * 1.8 + core * 1.4) * uPixel * (7.4 / -mv.z);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */ `
+        varying vec3 vCol; varying float vA;
+        void main(){ float d = length(gl_PointCoord - 0.5); gl_FragColor = vec4(vCol, vA * smoothstep(0.5, 0.0, d)); }`,
+    });
+    rig.add(new THREE.Points(nucGeo, nucMat));
+
     const resize = () => {
       const { width, height } = el.getBoundingClientRect();
       renderer.setSize(width, height, false);
@@ -471,8 +518,8 @@ export function NeuralCore({
       window.removeEventListener("pointercancel", onUp);
       document.documentElement.removeEventListener("pointerleave", onLeave);
       document.removeEventListener("visibilitychange", onVis);
-      [lineGeo, spikeGeo, dustGeo].forEach((g) => g.dispose());
-      [lineMat, spikeMat, dustMat].forEach((m) => m.dispose());
+      [lineGeo, spikeGeo, dustGeo, nucGeo].forEach((g) => g.dispose());
+      [lineMat, spikeMat, dustMat, nucMat].forEach((m) => m.dispose());
       renderer.dispose();
       renderer.domElement.remove();
     };

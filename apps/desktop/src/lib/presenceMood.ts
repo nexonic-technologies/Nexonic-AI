@@ -2,19 +2,26 @@ import { useEffect, useRef, useState } from "react";
 import type { Gaze, Mood, Temperament } from "../components/LiveFace";
 
 /**
- * Mood and gaze for Sharee and Nexa, driven only by real events: where the
- * cursor is, what the user hovers or clicks, what the user types and sends.
- * The personalities come from the expression datasheets: Sharee is analytical
- * and composed (smaller, slower reactions), Nexa is empathetic and expressive.
- * Until a model provider is connected (M17) the agents cannot answer, so they
- * react to the user but never pretend to reply.
+ * Behaviour for Sharee and Nexa.
+ *
+ * They do not react to the mouse. They react to the conversation:
+ *  - while the user types they listen (look at the message box, attentive,
+ *    the tone of the words colours their face);
+ *  - after a message is sent they think, and since no model is connected yet
+ *    (M17) they cannot answer, so they never pretend to reply;
+ *  - a click on one of them is a greeting.
+ * Between conversations they behave like two colleagues in the same room:
+ * they glance at each other, smile, nod, look back at the user, and Sharee
+ * sometimes drifts into thought while Nexa watches him. This idle body
+ * language is decorative; it never claims that work is happening.
+ * Personalities follow the datasheets: Sharee composed, Nexa expressive.
  */
 
 export type Agent = "Sharee" | "Nexa";
 
 export const TEMPERAMENT: Record<Agent, Temperament> = {
-  Sharee: { blinkMin: 3200, blinkMax: 6400, doubleBlink: 0.08, gazeGain: 0.9, saccade: 1.6 },
-  Nexa: { blinkMin: 2400, blinkMax: 5200, doubleBlink: 0.16, gazeGain: 1.05, saccade: 2.4 },
+  Sharee: { blinkMin: 3200, blinkMax: 6400, doubleBlink: 0.08, gazeGain: 0.9, saccade: 1.2 },
+  Nexa: { blinkMin: 2400, blinkMax: 5200, doubleBlink: 0.16, gazeGain: 1.05, saccade: 1.8 },
 };
 
 export const MOOD_LABEL: Record<Mood, string> = {
@@ -43,97 +50,123 @@ export function moodFromText(text: string, who: Agent): Mood {
   return "attentive";
 }
 
-const ANALYTICAL_NODES = new Set(["Reasoning", "Planning", "Memory"]);
+type Look = "user" | "partner" | "away" | "input";
+type Beat = { s: { mood: Mood; look: Look }; n: { mood: Mood; look: Look }; ms: number };
+
+// Idle scenes between conversations: short exchanges of looks and smiles.
+const SCENES: Beat[][] = [
+  [
+    { s: { mood: "neutral", look: "partner" }, n: { mood: "neutral", look: "user" }, ms: 1100 },
+    { s: { mood: "friendly", look: "partner" }, n: { mood: "neutral", look: "partner" }, ms: 900 },
+    { s: { mood: "friendly", look: "partner" }, n: { mood: "happy", look: "partner" }, ms: 2200 },
+    { s: { mood: "neutral", look: "user" }, n: { mood: "friendly", look: "user" }, ms: 2400 },
+  ],
+  [
+    { s: { mood: "thinking", look: "away" }, n: { mood: "neutral", look: "partner" }, ms: 2600 },
+    { s: { mood: "thinking", look: "away" }, n: { mood: "curious", look: "partner" }, ms: 1600 },
+    { s: { mood: "friendly", look: "partner" }, n: { mood: "happy", look: "partner" }, ms: 2000 },
+    { s: { mood: "neutral", look: "user" }, n: { mood: "neutral", look: "user" }, ms: 2200 },
+  ],
+  [
+    { s: { mood: "neutral", look: "partner" }, n: { mood: "neutral", look: "user" }, ms: 1400 },
+    { s: { mood: "confident", look: "partner" }, n: { mood: "friendly", look: "partner" }, ms: 1800 },
+    { s: { mood: "neutral", look: "user" }, n: { mood: "neutral", look: "user" }, ms: 2600 },
+  ],
+  [{ s: { mood: "neutral", look: "user" }, n: { mood: "neutral", look: "user" }, ms: 5200 }],
+  [{ s: { mood: "calm", look: "user" }, n: { mood: "friendly", look: "user" }, ms: 4200 }],
+];
 
 type Inputs = {
-  hoverAgent: Agent | null;
-  hoverNode: string | null;
   draft: string;
   sentAt: number; // ms timestamp of the last send, 0 if none
   greetAt: Record<Agent, number>; // last click on each agent
-  nodeEl: (id: string) => HTMLElement | null;
   agentEl: (who: Agent) => HTMLElement | null;
   inputEl: () => HTMLElement | null;
+  reduced: boolean;
 };
 
-export type AgentPresence = { mood: Mood; gaze: Gaze };
 export type PresenceView = Record<Agent, { mood: Mood; gaze: () => Gaze }>;
 
-const centre = (el: HTMLElement | null): Gaze => {
+const point = (el: HTMLElement | null, yFrac = 0.35): Gaze => {
   if (!el) return null;
   const r = el.getBoundingClientRect();
-  return { x: r.left + r.width / 2, y: r.top + r.height * 0.4 };
+  return { x: r.left + r.width / 2, y: r.top + r.height * yFrac };
 };
 
 export function usePresenceMood(inputs: Inputs): PresenceView {
   const ref = useRef(inputs);
   ref.current = inputs;
-  const pointer = useRef({ x: 0, y: 0, at: 0 });
-  const hoverSince = useRef<{ who: Agent | null; at: number }>({ who: null, at: 0 });
-  // gaze changes every frame, so it lives in a ref; only mood changes re-render
   const gazes = useRef<Record<Agent, Gaze>>({ Sharee: null, Nexa: null });
   const [moods, setMoods] = useState<Record<Agent, Mood>>({ Sharee: "neutral", Nexa: "neutral" });
-  const [view] = useState(() => ({
-    Sharee: () => gazes.current.Sharee,
-    Nexa: () => gazes.current.Nexa,
-  }));
+  const [view] = useState(() => ({ Sharee: () => gazes.current.Sharee, Nexa: () => gazes.current.Nexa }));
 
   useEffect(() => {
-    const onMove = (e: PointerEvent) => { pointer.current = { x: e.clientX, y: e.clientY, at: performance.now() }; };
-    window.addEventListener("pointermove", onMove);
+    let scene: Beat[] = SCENES[3]!;
+    let beat = 0;
+    let beatEnds = performance.now() + 2500;
+    let lastIdx = 3;
 
-    const decide = (who: Agent, now: number): AgentPresence => {
+    const resolve = (who: Agent, look: Look): Gaze => {
       const i = ref.current;
       const other: Agent = who === "Sharee" ? "Nexa" : "Sharee";
-      const p = pointer.current;
-      const cursor: Gaze = now - p.at < 4000 ? { x: p.x, y: p.y } : null;
-      const hs = hoverSince.current;
-      const sinceSend = now - i.sentAt;
-      const sinceGreet = now - i.greetAt[who];
-
-      // 1. just greeted (clicked): a warm reaction
-      if (sinceGreet < 2600) return { mood: who === "Nexa" ? "happy" : "friendly", gaze: cursor };
-      // 2. a message was sent but nobody can answer yet
-      if (i.sentAt && sinceSend < 1800) return { mood: "thinking", gaze: centre(i.inputEl()) };
-      if (i.sentAt && sinceSend < 4200) return { mood: who === "Nexa" ? "concerned" : "calm", gaze: null };
-      // 3. the user is typing: listen, read the tone
-      if (i.draft.trim()) {
-        const m = moodFromText(i.draft, who);
-        return { mood: m === "neutral" ? "attentive" : m, gaze: centre(i.inputEl()) };
+      if (look === "partner") return point(i.agentEl(other));
+      if (look === "input") return point(i.inputEl(), 0.5);
+      if (look === "away") {
+        const me = i.agentEl(who);
+        if (!me) return null;
+        const r = me.getBoundingClientRect();
+        return { x: r.left + r.width * (who === "Sharee" ? -0.6 : 1.6), y: r.top - r.height * 0.4 };
       }
-      // 4. the user is looking at this agent
-      if (i.hoverAgent === who) {
-        const held = now - (hs.who === who ? hs.at : now);
-        const mood: Mood = held < 900 ? "attentive" : held < 4000 ? "friendly" : who === "Nexa" ? "happy" : "confident";
-        return { mood, gaze: cursor };
-      }
-      // 5. the user is looking at the partner: glance over
-      if (i.hoverAgent === other) return { mood: "neutral", gaze: centre(i.agentEl(other)) };
-      // 6. a cognitive node is hovered: both study it
-      if (i.hoverNode) {
-        const m: Mood = ANALYTICAL_NODES.has(i.hoverNode) ? (who === "Sharee" ? "thinking" : "curious") : "curious";
-        return { mood: m, gaze: centre(i.nodeEl(i.hoverNode)) };
-      }
-      // 7. resting: follow the cursor while it moves, settle to calm when the user is away
-      if (now - p.at > 25000 && p.at > 0) return { mood: "calm", gaze: null };
-      return { mood: "neutral", gaze: cursor };
+      return null; // the user
     };
 
     const tick = () => {
       const now = performance.now();
-      const hs = hoverSince.current;
-      if (ref.current.hoverAgent !== hs.who) hoverSince.current = { who: ref.current.hoverAgent, at: now };
-      const s = decide("Sharee", now);
-      const n = decide("Nexa", now);
-      gazes.current = { Sharee: s.gaze, Nexa: n.gaze };
+      const i = ref.current;
+      let s: { mood: Mood; look: Look };
+      let n: { mood: Mood; look: Look };
+      const sinceSend = now - i.sentAt;
+      if (i.greetAt.Sharee && now - i.greetAt.Sharee < 2600) {
+        s = { mood: "friendly", look: "user" };
+        n = { mood: "happy", look: "partner" };
+      } else if (i.greetAt.Nexa && now - i.greetAt.Nexa < 2600) {
+        s = { mood: "friendly", look: "partner" };
+        n = { mood: "happy", look: "user" };
+      } else if (i.sentAt && sinceSend < 1800) {
+        s = { mood: "thinking", look: "input" };
+        n = { mood: "thinking", look: "input" };
+      } else if (i.sentAt && sinceSend < 4200) {
+        s = { mood: "calm", look: "partner" };
+        n = { mood: "concerned", look: "partner" };
+      } else if (i.draft.trim()) {
+        const ms = moodFromText(i.draft, "Sharee");
+        const mn = moodFromText(i.draft, "Nexa");
+        s = { mood: ms === "neutral" ? "attentive" : ms, look: "input" };
+        n = { mood: mn === "neutral" ? "attentive" : mn, look: "input" };
+      } else if (i.reduced) {
+        s = { mood: "neutral", look: "user" };
+        n = { mood: "neutral", look: "user" };
+      } else {
+        if (now > beatEnds) {
+          beat++;
+          if (beat >= scene.length) {
+            let idx = Math.floor(Math.random() * SCENES.length);
+            if (idx === lastIdx) idx = (idx + 1) % SCENES.length;
+            lastIdx = idx;
+            scene = SCENES[idx]!;
+            beat = 0;
+          }
+          beatEnds = now + scene[beat]!.ms * (0.85 + Math.random() * 0.3);
+        }
+        s = scene[beat]!.s;
+        n = scene[beat]!.n;
+      }
+      gazes.current = { Sharee: resolve("Sharee", s.look), Nexa: resolve("Nexa", n.look) };
       setMoods((prev) => (prev.Sharee === s.mood && prev.Nexa === n.mood ? prev : { Sharee: s.mood, Nexa: n.mood }));
     };
-    const id = window.setInterval(tick, 60);
-    return () => { window.clearInterval(id); window.removeEventListener("pointermove", onMove); };
+    const id = window.setInterval(tick, 80);
+    return () => window.clearInterval(id);
   }, []);
 
-  return {
-    Sharee: { mood: moods.Sharee, gaze: view.Sharee },
-    Nexa: { mood: moods.Nexa, gaze: view.Nexa },
-  };
+  return { Sharee: { mood: moods.Sharee, gaze: view.Sharee }, Nexa: { mood: moods.Nexa, gaze: view.Nexa } };
 }

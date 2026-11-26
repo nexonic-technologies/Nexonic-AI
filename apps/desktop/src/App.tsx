@@ -19,7 +19,8 @@ const FALLBACK: Record<Agent, string> = { Sharee: shareeNeutral, Nexa: nexaNeutr
 
 // Live-portrait atlas rendered on Apple Silicon by services/presence/render_atlas.py.
 const ATLAS_FILES = import.meta.glob<string>("./assets/live/*/*.webp", { eager: true, query: "?url", import: "default" });
-const ATLAS_MANIFEST = import.meta.glob<{ yaws: number[]; pitches: number[]; exprYaws: number[] }>("./assets/live/manifest.json", { eager: true, import: "default" });
+type Manifest = { yaws: number[]; pitches: number[]; exprYaws: number[]; faces?: Record<string, { cx: number; cy: number; w: number }> };
+const ATLAS_MANIFEST = import.meta.glob<Manifest>("./assets/live/manifest.json", { eager: true, import: "default" });
 function loadAtlas(who: Agent): FaceAtlas | null {
   const manifest = Object.values(ATLAS_MANIFEST)[0];
   if (!manifest) return null;
@@ -30,7 +31,7 @@ function loadAtlas(who: Agent): FaceAtlas | null {
     if (at >= 0) frames[path.slice(at + dir.length, -".webp".length)] = url;
   }
   if (!frames["g_0_0_o"]) return null;
-  return { yaws: manifest.yaws, pitches: manifest.pitches, exprYaws: manifest.exprYaws, frames };
+  return { yaws: manifest.yaws, pitches: manifest.pitches, exprYaws: manifest.exprYaws, frames, face: manifest.faces?.[who.toLowerCase()] };
 }
 const ATLAS: Record<Agent, FaceAtlas | null> = { Sharee: loadAtlas("Sharee"), Nexa: loadAtlas("Nexa") };
 
@@ -65,6 +66,17 @@ const NODES: { id: Node; icon: IconName; pos: string; owner: string; status: str
 
 interface Task { id: string; text: string; done: boolean }
 
+/** Circuit trace from a node to the ring; follows a node that was dragged somewhere else. */
+function tracePath(n: (typeof NODES)[number], pos?: { x: number; y: number }) {
+  if (!pos) return { d: n.path, pin: n.pin, hub: n.hub };
+  const px = (pos.x / 100) * 600;
+  const py = (pos.y / 100) * 400;
+  const ang = Math.atan2(py - 200, px - 300);
+  const hub: [number, number] = [300 + Math.cos(ang) * 110, 200 + Math.sin(ang) * 84];
+  const mx = px + (hub[0] - px) * 0.45;
+  return { d: `M ${px.toFixed(1)} ${py.toFixed(1)} H ${mx.toFixed(1)} L ${hub[0].toFixed(1)} ${hub[1].toFixed(1)}`, pin: [px, py] as [number, number], hub };
+}
+
 export function App() {
   const reduced = useReducedMotion();
   const [theme, setTheme] = usePersisted<Theme>("theme", "dark");
@@ -72,8 +84,10 @@ export function App() {
   const [section, setSection] = useState<Section>("presence");
   const [mode, setMode] = usePersisted<Mode>("mode", "world");
   const [node, setNode] = useState<Node | null>(null);
+  // Nodes can be dragged anywhere in the core area; positions are % of the core box.
+  const [nodePos, setNodePos] = usePersisted<Partial<Record<Node, { x: number; y: number }>>>("node-pos", {});
+  const nodeDrag = useRef<{ id: Node; sx: number; sy: number; moved: boolean } | null>(null);
   const [hoverNode, setHoverNode] = useState<Node | null>(null);
-  const [hoverAgent, setHoverAgent] = useState<"Sharee" | "Nexa" | null>(null);
   const [draft, setDraft] = useState("");
   const [sentAt, setSentAt] = useState(0);
   const [greetAt, setGreetAt] = useState<Record<Agent, number>>({ Sharee: 0, Nexa: 0 });
@@ -144,16 +158,14 @@ export function App() {
   // Agents have no model provider yet (M17), so both are honestly offline.
   const agentState: PresenceState = "offline";
   const activeMode = MODES.find((m) => m.id === mode) ?? MODES[0]!;
-  const coreFocus = hoverNode ?? node ?? hoverAgent;
+  const coreFocus = hoverNode ?? node;
   // Real agent activity arrives with the agent runtimes (M16); cursor play on the core is not activity.
   const coreActivity = 0;
   const presence = usePresenceMood({
-    hoverAgent,
-    hoverNode,
     draft,
     sentAt,
     greetAt,
-    nodeEl: (id) => document.querySelector<HTMLElement>(`.node[data-node="${id}"]`),
+    reduced,
     agentEl: (who) => document.querySelector<HTMLElement>(`.presence.${who.toLowerCase()} .portrait-stage`),
     inputEl: () => document.querySelector<HTMLElement>(".talk-field"),
   });
@@ -178,8 +190,6 @@ export function App() {
             mood={presence.Sharee.mood}
             gaze={presence.Sharee.gaze}
             reduced={reduced}
-            active={hoverAgent === "Sharee"}
-            onHover={(on) => setHoverAgent(on ? "Sharee" : null)}
             onGreet={() => setGreetAt((g) => ({ ...g, Sharee: performance.now() }))}
           />
           <div className="core" data-active={coreActivity > 0}>
@@ -191,10 +201,10 @@ export function App() {
                 const sideClass = n.pos.endsWith("l") ? "left" : "right";
                 return (
                   <g key={n.id} className={`trace ${sideClass} ${active ? "active" : ""}`}>
-                    <path className="trace-base" d={n.path} />
-                    <path className="trace-pulse" d={n.path} />
-                    <circle className="trace-dot" cx={n.pin[0]} cy={n.pin[1]} r="3" />
-                    <circle className="trace-dot" cx={n.hub[0]} cy={n.hub[1]} r="3.5" />
+                    <path className="trace-base" d={tracePath(n, nodePos[n.id]).d} />
+                    <path className="trace-pulse" d={tracePath(n, nodePos[n.id]).d} />
+                    <circle className="trace-dot" cx={tracePath(n, nodePos[n.id]).pin[0]} cy={tracePath(n, nodePos[n.id]).pin[1]} r="3" />
+                    <circle className="trace-dot" cx={tracePath(n, nodePos[n.id]).hub[0]} cy={tracePath(n, nodePos[n.id]).hub[1]} r="3.5" />
                   </g>
                 );
               })}
@@ -211,7 +221,31 @@ export function App() {
               <em><RollText value={coreActivity > 0 ? "ACTIVE" : "IDLE"} /></em>
             </button>
             {nodes.map((n) => (
-              <button key={n.id} className={`node ${n.pos}`} data-node={n.id} data-spot onClick={() => setNode(n.id)} aria-pressed={node === n.id}
+              <button key={n.id} className={`node ${n.pos} ${nodePos[n.id] ? "moved" : ""}`} data-node={n.id} data-spot aria-pressed={node === n.id}
+                style={nodePos[n.id] ? { left: `${nodePos[n.id]!.x}%`, top: `${nodePos[n.id]!.y}%`, right: "auto", bottom: "auto" } : undefined}
+                title="Drag to move · double-click to put back"
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  e.stopPropagation();
+                  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                  nodeDrag.current = { id: n.id, sx: e.clientX, sy: e.clientY, moved: false };
+                }}
+                onPointerMove={(e) => {
+                  const d = nodeDrag.current;
+                  if (!d || d.id !== n.id) return;
+                  if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 5) return;
+                  d.moved = true;
+                  const core = (e.currentTarget as HTMLElement).closest(".core")!.getBoundingClientRect();
+                  const x = Math.min(92, Math.max(8, ((e.clientX - core.left) / core.width) * 100));
+                  const y = Math.min(94, Math.max(6, ((e.clientY - core.top) / core.height) * 100));
+                  setNodePos((p) => ({ ...p, [n.id]: { x, y } }));
+                }}
+                onPointerUp={() => {
+                  const d = nodeDrag.current;
+                  nodeDrag.current = null;
+                  if (d && !d.moved) setNode(n.id);
+                }}
+                onDoubleClick={() => setNodePos((p) => { const q = { ...p }; delete q[n.id]; return q; })}
                 onPointerEnter={() => setHoverNode(n.id)} onPointerLeave={() => setHoverNode(null)} onFocus={() => setHoverNode(n.id)} onBlur={() => setHoverNode(null)}>
                 <Icon name={n.icon} size={15} /><span>{n.id}</span>
               </button>
@@ -224,8 +258,6 @@ export function App() {
             mood={presence.Nexa.mood}
             gaze={presence.Nexa.gaze}
             reduced={reduced}
-            active={hoverAgent === "Nexa"}
-            onHover={(on) => setHoverAgent(on ? "Nexa" : null)}
             onGreet={() => setGreetAt((g) => ({ ...g, Nexa: performance.now() }))}
           />
           <nav className="modes" aria-label="Workspace mode" ref={modesRef}>
@@ -426,8 +458,6 @@ function Presence({
   mood,
   gaze,
   reduced,
-  active,
-  onHover,
   onGreet,
 }: {
   name: Agent;
@@ -436,8 +466,6 @@ function Presence({
   mood: Mood;
   gaze: () => Gaze;
   reduced: boolean;
-  active: boolean;
-  onHover: (hovering: boolean) => void;
   onGreet: () => void;
 }) {
   const live = ATLAS[name] !== null;
@@ -445,30 +473,18 @@ function Presence({
   const liveMotion = state === "speaking" || state === "listening";
   const statusTag = state === "offline" ? "NO MODEL" : "LIVE";
   const moodLabel = MOOD_LABEL[mood];
-  const stageRef = useRef<HTMLButtonElement>(null);
 
-  const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
-    const el = stageRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    el.style.setProperty("--hpx", `${(((e.clientX - r.left) / Math.max(1, r.width)) * 100).toFixed(1)}%`);
-    el.style.setProperty("--hpy", `${(((e.clientY - r.top) / Math.max(1, r.height)) * 100).toFixed(1)}%`);
-  };
 
   return (
     <div
-      className={`presence ${side} ${name.toLowerCase()} ${active ? "is-active" : ""} ${live ? "is-live" : ""}`}
+      className={`presence ${side} ${name.toLowerCase()} ${live ? "is-live" : ""}`}
       data-mood={mood}
-      onPointerEnter={() => onHover(true)}
-      onPointerLeave={() => onHover(false)}
     >
       <div className="aura" />
       <button
-        ref={stageRef}
         type="button"
         className="portrait-stage"
         onClick={onGreet}
-        onPointerMove={handlePointerMove}
         aria-label={`${name}, ${moodLabel.toLowerCase()}. Click to say hello.`}
       >
         <span className="holo-spot" aria-hidden="true" />
@@ -489,7 +505,7 @@ function Presence({
       <div className="who">
         <SplitText as="h2" className="agent-name" text={name.toUpperCase()} delay={side === "left" ? 620 : 720} stagger={55} />
         <p className="agent-status">
-          <span className={`dot ${state === "offline" ? (active ? "preview" : "off") : "on"}`} />
+          <span className={`dot ${state === "offline" ? "off" : "on"}`} />
           <RollText value={state === "offline" ? "Standby" : presenceLabel[state]} />
           <i>·</i>
           <ScrambleText text={statusTag} delay={400} className="mono" />

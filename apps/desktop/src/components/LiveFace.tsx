@@ -22,7 +22,14 @@ export type FaceAtlas = {
   pitches: number[];
   exprYaws: number[];
   frames: Record<string, string>; // key -> url
+  /** Face box in the frames (fractions of width/height), used to line both characters up. */
+  face?: { cx: number; cy: number; w: number };
 };
+
+// Where every face sits in its stage, so Sharee and Nexa share one eye line and size.
+const FACE_X = 0.5;
+const FACE_Y = 0.36;
+const FACE_W = 0.36;
 
 export type Temperament = {
   blinkMin: number; // ms between blinks
@@ -138,8 +145,8 @@ export function LiveFace({
       let wantYaw = 0;
       let wantPitch = 0;
       if (g && drawBox.w > 0) {
-        const fx = rect.left + (drawBox.x + drawBox.w * 0.5) / dpr;
-        const fy = rect.top + (drawBox.y + drawBox.h * 0.3) / dpr;
+        const fx = rect.left + (drawBox.x + drawBox.w * (atlas.face?.cx ?? 0.5)) / dpr;
+        const fy = rect.top + (drawBox.y + drawBox.h * (atlas.face?.cy ?? 0.3)) / dpr;
         const depth = 620;
         wantYaw = (Math.atan2(g.x - fx, depth) * 180) / Math.PI * temperament.gazeGain * YAW_SIGN;
         wantPitch = (Math.atan2(g.y - fy, depth) * 180) / Math.PI * temperament.gazeGain * PITCH_SIGN;
@@ -180,13 +187,22 @@ export function LiveFace({
 
       const cur = images.get(shown);
       if (!cur || !cur.naturalWidth) return;
-      // contain-fit, anchored to the bottom like the old portrait
       const cw = canvas.width;
       const ch = canvas.height;
-      const sc = Math.min(cw / cur.naturalWidth, ch / cur.naturalHeight);
+      const face = atlas.face;
+      let sc: number;
+      if (face) {
+        // same face size and eye line for both characters
+        sc = (FACE_W * cw) / (face.w * cur.naturalWidth);
+        sc = Math.min(sc, (0.5 * ch) / (face.w * cur.naturalWidth));
+      } else {
+        sc = Math.min(cw / cur.naturalWidth, ch / cur.naturalHeight);
+      }
       const w = cur.naturalWidth * sc;
       const h = cur.naturalHeight * sc;
-      drawBox = { x: (cw - w) / 2, y: ch - h, w, h };
+      drawBox = face
+        ? { x: cw * FACE_X - face.cx * w, y: ch * FACE_Y - face.cy * h, w, h }
+        : { x: (cw - w) / 2, y: ch - h, w, h };
       const breath = reduced ? 0 : Math.sin((now / 4300) * Math.PI * 2);
       const bs = 1 + breath * 0.004;
       ctx.clearRect(0, 0, cw, ch);
