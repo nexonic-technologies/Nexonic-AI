@@ -1,4 +1,6 @@
-@import "@fontsource-variable/inter";
+@import "@fontsource-variable/sora";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 @import "@nexonic/design-system/tokens.css";
 
 * { box-sizing: border-box; margin: 0; }
@@ -39,7 +41,7 @@ button:disabled { cursor: default; }
 }
 .brand { display: flex; align-items: center; gap: 12px; padding-right: var(--sp-6); margin-right: var(--sp-3); border-right: 1px solid var(--line); height: 44px; }
 .brand b { display: block; font: 700 27px/0.95 var(--font-display); letter-spacing: 0.02em; }
-.brand span { display: block; font: 700 12px/1.3 var(--font-sans); letter-spacing: 0.12em; color: var(--text); }
+.brand > div > span { display: block; font: 700 12px/1.3 var(--font-sans); letter-spacing: 0.12em; color: var(--text); }
 .title { flex: 1; min-width: 0; }
 .title h1 { font: 500 19px/1.25 var(--font-display); }
 .title p { font: 400 13.5px/1.5 var(--font-sans); color: var(--text-muted); }
@@ -353,3 +355,100 @@ html[data-theme="light"] .stage {
   box-shadow: 0 24px 48px -28px rgb(15 23 42 / 0.45);
 }
 html[data-theme="light"] .stage .modes { margin-bottom: var(--sp-3); }
+
+/* ================= Typography system =================
+   Sora (display): brand, agent names, headings, core label.
+   Geist (text): interface copy.  Geist Mono (system): statuses, counts, keys. */
+body { font-family: var(--font-sans); font-feature-settings: "ss01", "cv01"; letter-spacing: -0.006em; text-rendering: optimizeLegibility; }
+.mono, .num, kbd, .meta, .pill { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.brand b { font: 700 25px/1 var(--font-display); letter-spacing: 0.06em; }
+.brand > div > span { font: 500 9.5px/1.6 var(--font-mono); letter-spacing: 0.32em; color: var(--text-muted); margin-top: 3px; }
+.title h1 { font: 500 18px/1.2 var(--font-display); letter-spacing: -0.01em; }
+.title p { font: 400 13px/1.6 var(--font-sans); color: var(--text-muted); letter-spacing: 0; }
+.search { font: 400 14px/1 var(--font-sans); }
+.search kbd { font: 500 11px/1 var(--font-mono); letter-spacing: 0.04em; }
+
+.nav b { font: 500 15px/1.25 var(--font-sans); letter-spacing: -0.01em; }
+.nav small { font: 400 12px/1.4 var(--font-sans); color: var(--text-muted); letter-spacing: 0; }
+.sys-card b { font: 600 13.5px/1.3 var(--font-sans); }
+.sys-card small { font: 400 11px/1.6 var(--font-mono); letter-spacing: 0.02em; }
+.sys-card .chip { font: 600 17px/1 var(--font-display); }
+.agents-chip { font: 500 12.5px/1 var(--font-sans); }
+
+.agent-name { display: block; font: 600 34px/1 var(--font-display); letter-spacing: 0.16em; color: #fff; }
+.agent-status { display: flex; align-items: center; gap: 8px; margin-top: 10px; font: 400 14px/1.2 var(--font-sans); color: rgb(232 237 244 / 0.86); }
+.agent-status .dot { margin-right: 0; }
+.agent-status i { font-style: normal; opacity: 0.6; }
+.agent-status .mono { font: 500 10.5px/1 var(--font-mono); letter-spacing: 0.14em; color: rgb(232 237 244 / 0.6); }
+
+.core-label strong { display: grid; gap: 2px; font: 500 14px/1.1 var(--font-display); letter-spacing: 0.22em; }
+.core-label span { font: 500 9.5px/1 var(--font-mono); letter-spacing: 0.2em; }
+.core-label em { font: 500 9.5px/1 var(--font-mono); letter-spacing: 0.24em; color: var(--text-faint); }
+.node { font: 500 14px/1 var(--font-sans); letter-spacing: -0.005em; }
+.mode { font: 500 14px/1 var(--font-sans); letter-spacing: -0.005em; }
+
+.panel h3 { font: 500 16px/1.2 var(--font-display); letter-spacing: -0.012em; }
+.panel .meta { font: 500 10.5px/1 var(--font-mono); letter-spacing: 0.06em; color: var(--text-muted); text-transform: uppercase; }
+.tasks li { font: 400 14px/1.35 var(--font-sans); }
+.empty-state p { font: 400 14px/1.5 var(--font-sans); }
+.empty-state small { font: 400 12px/1.5 var(--font-sans); }
+.aware li { font: 400 14px/1.3 var(--font-sans); }
+.aware .local em { font: 500 11px/1 var(--font-mono); letter-spacing: 0.06em; display: inline-flex; align-items: center; }
+.pill { font: 600 10px/1.2 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.quick-btn { font: 500 14px/1 var(--font-sans); }
+.inspector h3 { font: 600 16px/1 var(--font-display); }
+.inspector dl { font: 400 13px/1.45 var(--font-sans); }
+.inspector dt { font: 500 10.5px/1.8 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; }
+
+/* ---------- Motion typography ---------- */
+.split { display: inline-block; white-space: nowrap; }
+.split-ch { display: inline-block; animation: ch-in 680ms var(--ease-out) both; animation-delay: calc(var(--d, 0ms) + var(--i, 0) * var(--s, 24ms)); }
+@keyframes ch-in { from { opacity: 0; transform: translateY(0.45em); filter: blur(6px); } }
+.tag-word { display: inline-block; animation: word-in 600ms var(--ease-out) both; }
+.tag-word i { font-style: normal; margin: 0 8px; opacity: 0.5; }
+@keyframes word-in { from { opacity: 0; transform: translateX(-6px); } }
+
+/* Agent names: a light wave travels across the letters every few seconds */
+.agent-name .split-ch {
+  color: #fff;
+  animation: ch-in 680ms var(--ease-out) both, ch-glow 7s var(--ease-in-out) infinite;
+  animation-delay: calc(var(--d, 0ms) + var(--i, 0) * var(--s, 24ms)), calc(2.2s + var(--i, 0) * 90ms);
+}
+.presence.nexa .agent-name .split-ch { animation-delay: calc(var(--d, 0ms) + var(--i, 0) * var(--s, 24ms)), calc(3.4s + var(--i, 0) * 90ms); }
+@keyframes ch-glow {
+  0%, 12%, 100% { color: #fff; text-shadow: none; }
+  6% { color: rgb(var(--rgb)); text-shadow: 0 0 18px rgb(var(--rgb) / 0.8); }
+}
+.scramble { font-variant-numeric: tabular-nums; }
+.roll { display: inline-grid; overflow: hidden; vertical-align: bottom; }
+.roll > span { grid-area: 1 / 1; white-space: nowrap; }
+.roll-in { animation: roll-in 420ms var(--ease-out) both; }
+.roll-out { animation: roll-out 420ms var(--ease-out) both; }
+@keyframes roll-in { from { transform: translateY(100%); opacity: 0; } }
+@keyframes roll-out { to { transform: translateY(-100%); opacity: 0; } }
+
+/* Hover typography */
+.node { transition: letter-spacing var(--dur-base) var(--ease-out), background var(--dur-fast), transform var(--dur-base) var(--spring); }
+.node:hover { letter-spacing: 0.02em; }
+.nav b { transition: letter-spacing var(--dur-base) var(--ease-out); }
+.nav:hover b { letter-spacing: 0.005em; }
+
+/* Dock: field with rolling hint */
+.talk-field { position: relative; flex: 1; height: 100%; display: flex; align-items: center; }
+.talk-field input { width: 100%; font: 400 16px/1 var(--font-sans); letter-spacing: -0.005em; }
+.talk-hint { position: absolute; left: 0; right: 0; pointer-events: none; color: var(--text-muted); font: 400 16px/1.2 var(--font-sans); }
+
+
+
+/* Layout fixes */
+.brand > div { white-space: nowrap; min-width: max-content; }
+.brand b.split { display: block; }
+.preview-badge { left: 50%; bottom: auto; top: 6px; transform: translateX(-50%); }
+@media (max-height: 860px) {
+  .panel { height: 228px; padding: 14px 16px; gap: 10px; }
+  .talk-wrap, .quick { padding: 10px 14px; }
+  .talk { height: 52px; } .quick-btn, .focus-btn { height: 50px; } .focus-btn { width: 50px; }
+  .main { gap: var(--sp-3); }
+  .agent-name { font-size: 30px; }
+}
