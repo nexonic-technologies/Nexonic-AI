@@ -20,8 +20,8 @@ env:
   FLP_COMMIT: d5361f4806c14fe2051eecb1dd5a89930f46db0d
   # pinned model snapshots (verified 26 Nov 2026)
   FLIP_MLX_WEIGHTS_REVISION: 2cc2ac92c9fe65ca4fb68cb1a1556ead285e7391
-  # BiRefNet-portrait (MIT) for transparent backgrounds; empty = resolve and print, then pin
-  BIREFNET_REVISION: ""
+  # BiRefNet-portrait (MIT) for transparent backgrounds (pinned 26 Nov 2026)
+  BIREFNET_REVISION: b6561965a70070d9143fd9e558f6ca3c481510db
   # plain HTTP downloads with timeouts (the xet transfer stalled for an hour once)
   HF_HUB_DISABLE_XET: "1"
   HF_HUB_DOWNLOAD_TIMEOUT: "60"
@@ -66,9 +66,10 @@ jobs:
       - name: Transparent background (BiRefNet on the GPU)
         timeout-minutes: 20
         run: |
-          cd flp
-          uv pip install -q torch torchvision transformers timm kornia einops
-          uv run python "$GITHUB_WORKSPACE/services/presence/matte_atlas.py" --atlas "$RUNNER_TEMP/atlas" ${BIREFNET_REVISION:+--revision "$BIREFNET_REVISION"}
+          # own environment: the LivePortrait env pins its own torch stack
+          uv venv -q --python 3.12 "$RUNNER_TEMP/matte-env"
+          uv pip install -q --python "$RUNNER_TEMP/matte-env/bin/python" torch torchvision transformers timm kornia einops huggingface_hub pillow numpy
+          "$RUNNER_TEMP/matte-env/bin/python" "$GITHUB_WORKSPACE/services/presence/matte_atlas.py" --atlas "$RUNNER_TEMP/atlas" --revision "$BIREFNET_REVISION"
           du -sh "$RUNNER_TEMP/atlas"/*
       - name: Print atlas to the log (base64 tar)
         run: |
