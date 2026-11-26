@@ -1,0 +1,55 @@
+name: Presence probe
+
+# Renders talking clips of Sharee and Nexa fully on Apple Silicon with free,
+# MIT-licensed models (Kokoro voice -> JoyVASA motion -> LivePortrait MLX).
+# Proves quality and speed before the presence engine ships in the app.
+on:
+  workflow_dispatch:
+  push:
+    paths: ["services/presence/**", ".github/workflows/presence.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: presence-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLP_REPO: https://github.com/ivanfioravanti/fasterliveportrait-mlx
+  FLP_COMMIT: d5361f4806c14fe2051eecb1dd5a89930f46db0d
+
+jobs:
+  render:
+    name: Talking clips (Apple Silicon, on-device)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Tools
+        run: |
+          brew install uv ffmpeg espeak-ng >/dev/null
+          sysctl -n machdep.cpu.brand_string; sw_vers
+      - name: FasterLivePortrait-MLX (pinned)
+        run: |
+          git init -q flp && cd flp
+          git remote add origin "$FLP_REPO"
+          git fetch -q --depth 1 origin "$FLP_COMMIT" && git checkout -q FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$FLP_COMMIT"
+          uv sync
+          uv run python -c "import mlx.core as mx; print('mlx', mx.__version__, mx.default_device())"
+      - name: Render
+        env:
+          HF_HUB_DISABLE_TELEMETRY: "1"
+        run: |
+          cd flp
+          uv run python "$GITHUB_WORKSPACE/services/presence/render_demo.py" --flp . --out "$RUNNER_TEMP/presence"
+          ls -la "$RUNNER_TEMP/presence"
+          # record the exact model snapshots used, for pinning
+          find ~/.cache/huggingface/hub -maxdepth 3 -path '*/snapshots/*' -type d | tee "$RUNNER_TEMP/presence/model-snapshots.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: presence-clips
+          path: ${{ runner.temp }}/presence
+          retention-days: 14
