@@ -20,10 +20,11 @@ import cv2
 import numpy as np
 
 MUSETALK_SIZE = 256
-# Canonical positions inside the 256x256 upright crop so MuseTalk's y=128
-# mask boundary lands cleanly on the nose bridge between eyes and lips.
-_CANON_EYE_XY = (128.0, 86.0)
-_CANON_LIP_XY = (128.0, 170.5)
+# Canonical positions inside the 256x256 upright crop matching MuseTalk's
+# S3FD/DWPose framing: y=0 sits just above eyebrows, y=128 lands at the nose
+# tip (mask boundary), mouth sits at y=158, and chin clears y=224.
+_CANON_EYE_XY = (128.0, 64.0)
+_CANON_LIP_XY = (128.0, 158.0)
 _CANON_EYE_LIP_DIST = _CANON_LIP_XY[1] - _CANON_EYE_XY[1]
 
 
@@ -36,7 +37,7 @@ def extract_eye_lip_anchors(landmarks: np.ndarray) -> np.ndarray | None:
         left_eye = np.mean(landmarks[[0, 6, 12, 18]], axis=0)
         right_eye = np.mean(landmarks[[24, 30, 36, 42]], axis=0)
         eye_center = 0.5 * (left_eye + right_eye)
-        lip_center = 0.5 * (landmarks[48] + landmarks[66])
+        lip_center = 0.25 * (landmarks[48] + landmarks[66] + landmarks[90] + landmarks[102])
         anchors = np.stack([eye_center, lip_center], axis=0).astype(np.float32)
     elif n == 106:
         left_eye = np.mean(landmarks[[33, 35, 40, 39]], axis=0)
@@ -105,16 +106,16 @@ def similarity_matrix_to_canonical(anchors: np.ndarray) -> np.ndarray:
 
 
 def build_mouth_blend_mask(height: int = MUSETALK_SIZE, width: int = MUSETALK_SIZE) -> np.ndarray:
-    """Create a soft (H, W, 1) float32 mask targeting the lower face and jaw."""
+    """Create a soft (H, W, 1) float32 mask tightly framing the mouth and chin."""
     mask = np.zeros((height, width), dtype=np.float32)
-    cy = int(round(height * 0.70))
+    cy = int(round(height * 0.65))
     cx = int(round(width * 0.50))
-    ry = max(4, int(round(height * 0.19)))
-    rx = max(4, int(round(width * 0.27)))
+    ry = max(4, int(round(height * 0.145)))
+    rx = max(4, int(round(width * 0.205)))
     cv2.ellipse(mask, (cx, cy), (rx, ry), 0, 0, 360, 1.0, -1)
-    # Keep upper face / nose bridge untouched (matches MuseTalk's y=128 split)
+    # Keep upper face / nose tip untouched (matches MuseTalk's y=128 split)
     mask[: int(round(height * 0.50)), :] = 0.0
-    k = max(5, (min(height, width) // 10) | 1)
+    k = max(5, (min(height, width) // 12) | 1)
     mask = cv2.GaussianBlur(mask, (k, k), 0)
     peak = float(mask.max())
     if peak > 1e-6:

@@ -54,13 +54,15 @@ class MouthSyncGeometryTests(unittest.TestCase):
         lmk[[24, 30, 36, 42]] = np.array([210.0, 145.0], dtype=np.float32)
         lmk[48] = np.array([145.0, 195.0], dtype=np.float32)
         lmk[66] = np.array([175.0, 205.0], dtype=np.float32)
+        lmk[90] = np.array([160.0, 196.0], dtype=np.float32)
+        lmk[102] = np.array([160.0, 204.0], dtype=np.float32)
 
         anc = extract_eye_lip_anchors(lmk)
         self.assertIsNotNone(anc)
         m = similarity_matrix_to_canonical(anc)  # type: ignore[arg-type]
         pts = np.hstack([anc, np.ones((2, 1), dtype=np.float32)]) @ m.T  # type: ignore[arg-type]
-        np.testing.assert_allclose(pts[0], [128.0, 86.0], atol=1e-3)
-        np.testing.assert_allclose(pts[1], [128.0, 170.5], atol=1e-3)
+        np.testing.assert_allclose(pts[0], [128.0, 64.0], atol=1e-3)
+        np.testing.assert_allclose(pts[1], [128.0, 158.0], atol=1e-3)
 
     def test_smooth_anchors_fills_gaps(self) -> None:
         a0 = np.array([[100.0, 100.0], [100.0, 170.0]], dtype=np.float32)
@@ -72,8 +74,8 @@ class MouthSyncGeometryTests(unittest.TestCase):
     def test_mouth_mask_keeps_upper_face_zero(self) -> None:
         mask = build_mouth_blend_mask(MUSETALK_SIZE, MUSETALK_SIZE)
         self.assertEqual(mask.shape, (MUSETALK_SIZE, MUSETALK_SIZE, 1))
-        self.assertLess(float(mask[:105, :, 0].max()), 0.05)
-        self.assertGreater(float(mask[165:195, 110:145, 0].mean()), 0.5)
+        self.assertLess(float(mask[:115, :, 0].max()), 0.05)
+        self.assertGreater(float(mask[150:180, 110:145, 0].mean()), 0.5)
 
     def test_match_skin_tone_preserves_shape_and_dtype(self) -> None:
         gen = np.full((MUSETALK_SIZE, MUSETALK_SIZE, 3), 100, dtype=np.uint8)
