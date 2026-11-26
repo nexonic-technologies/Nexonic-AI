@@ -2,49 +2,37 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { presenceLabel, type MotionLevel, type PresenceState, type Theme } from "@nexonic/design-system";
 import { Icon, type IconName } from "./components/Icon";
 import { NeuralCore } from "./components/NeuralCore";
+import { LiveFace, type FaceAtlas, type Gaze, type Mood } from "./components/LiveFace";
+import { MOOD_LABEL, TEMPERAMENT, usePresenceMood } from "./lib/presenceMood";
 import { CountUp, RollText, ScrambleText, SplitText, useCycle } from "./components/MotionText";
 import { capabilityLabel, formatBytes, inDesktop, ipc, type Capability, type MemorySummary, type MemoryView, type PermissionsView, type SystemInfo, type UpdateStatus } from "./lib/ipc";
 import { usePersisted, useReducedMotion } from "./lib/store";
 import shareeNeutral from "./assets/characters/sharee.webp";
-import shareeHappy from "./assets/characters/sharee-happy.webp";
-import shareeCurious from "./assets/characters/sharee-curious.webp";
-import shareeDetermined from "./assets/characters/sharee-determined.webp";
-import shareeCalm from "./assets/characters/sharee-calm.webp";
 import nexaNeutral from "./assets/characters/nexa.webp";
-import nexaHappy from "./assets/characters/nexa-happy.webp";
-import nexaCurious from "./assets/characters/nexa-curious.webp";
-import nexaDetermined from "./assets/characters/nexa-determined.webp";
-import nexaCalm from "./assets/characters/nexa-calm.webp";
 
 type Section = "presence" | "hub" | "memory" | "evolution" | "activity" | "computer" | "intelligence" | "settings";
 type Mode = "world" | "collaborate" | "analyze" | "create" | "automate";
 type Node = "Reasoning" | "Memory" | "Learning" | "Perception" | "Planning" | "Action";
-type ExpressionKey = "neutral" | "happy" | "curious" | "determined" | "calm";
+type Agent = "Sharee" | "Nexa";
 
-const EXPRESSIONS: { key: ExpressionKey; label: string }[] = [
-  { key: "neutral", label: "Neutral" },
-  { key: "happy", label: "Happy" },
-  { key: "curious", label: "Curious" },
-  { key: "determined", label: "Focused" },
-  { key: "calm", label: "Calm" },
-];
+const FALLBACK: Record<Agent, string> = { Sharee: shareeNeutral, Nexa: nexaNeutral };
 
-const PORTRAITS: Record<"Sharee" | "Nexa", Record<ExpressionKey, string>> = {
-  Sharee: {
-    neutral: shareeNeutral,
-    happy: shareeHappy,
-    curious: shareeCurious,
-    determined: shareeDetermined,
-    calm: shareeCalm,
-  },
-  Nexa: {
-    neutral: nexaNeutral,
-    happy: nexaHappy,
-    curious: nexaCurious,
-    determined: nexaDetermined,
-    calm: nexaCalm,
-  },
-};
+// Live-portrait atlas rendered on Apple Silicon by services/presence/render_atlas.py.
+const ATLAS_FILES = import.meta.glob<string>("./assets/live/*/*.webp", { eager: true, query: "?url", import: "default" });
+const ATLAS_MANIFEST = import.meta.glob<{ yaws: number[]; pitches: number[]; exprYaws: number[] }>("./assets/live/manifest.json", { eager: true, import: "default" });
+function loadAtlas(who: Agent): FaceAtlas | null {
+  const manifest = Object.values(ATLAS_MANIFEST)[0];
+  if (!manifest) return null;
+  const frames: Record<string, string> = {};
+  const dir = `/live/${who.toLowerCase()}/`;
+  for (const [path, url] of Object.entries(ATLAS_FILES)) {
+    const at = path.indexOf(dir);
+    if (at >= 0) frames[path.slice(at + dir.length, -".webp".length)] = url;
+  }
+  if (!frames["g_0_0_o"]) return null;
+  return { yaws: manifest.yaws, pitches: manifest.pitches, exprYaws: manifest.exprYaws, frames };
+}
+const ATLAS: Record<Agent, FaceAtlas | null> = { Sharee: loadAtlas("Sharee"), Nexa: loadAtlas("Nexa") };
 
 const NAV: { id: Section; icon: IconName; title: string; sub: string }[] = [
   { id: "presence", icon: "presence", title: "Presence", sub: "Sharee, Nexa & You" },
@@ -86,9 +74,9 @@ export function App() {
   const [node, setNode] = useState<Node | null>(null);
   const [hoverNode, setHoverNode] = useState<Node | null>(null);
   const [hoverAgent, setHoverAgent] = useState<"Sharee" | "Nexa" | null>(null);
-  const [coreHover, setCoreHover] = useState(false);
-  const [corePulse, setCorePulse] = useState(0);
-  const [exprIndex, setExprIndex] = useState<{ Sharee: number; Nexa: number }>({ Sharee: 0, Nexa: 0 });
+  const [draft, setDraft] = useState("");
+  const [sentAt, setSentAt] = useState(0);
+  const [greetAt, setGreetAt] = useState<Record<Agent, number>>({ Sharee: 0, Nexa: 0 });
   const [palette, setPalette] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [autoUpdate, setAutoUpdate] = usePersisted<boolean>("auto-update", false);
@@ -145,11 +133,6 @@ export function App() {
     void ipc.checkUpdates().then((u) => { if (u) setUpdateInfo(u); });
   }, [autoUpdate]);
   useEffect(() => {
-    if (!corePulse) return;
-    const t = setTimeout(() => setCorePulse(0), 1400);
-    return () => clearTimeout(t);
-  }, [corePulse]);
-  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); }
       if (e.key === "Escape") { setPalette(false); setNode(null); setAboutOpen(false); }
@@ -162,12 +145,18 @@ export function App() {
   const agentState: PresenceState = "offline";
   const activeMode = MODES.find((m) => m.id === mode) ?? MODES[0]!;
   const coreFocus = hoverNode ?? node ?? hoverAgent;
-  const interactiveActivity = Math.max(corePulse, coreHover ? 0.55 : 0, hoverAgent ? 0.42 : 0, hoverNode ? 0.35 : 0);
-
-  const cycleExpression = (who: "Sharee" | "Nexa") => {
-    setExprIndex((cur) => ({ ...cur, [who]: (cur[who] + 1) % EXPRESSIONS.length }));
-    setCorePulse(0.85);
-  };
+  // Real agent activity arrives with the agent runtimes (M16); cursor play on the core is not activity.
+  const coreActivity = 0;
+  const presence = usePresenceMood({
+    hoverAgent,
+    hoverNode,
+    draft,
+    sentAt,
+    greetAt,
+    nodeEl: (id) => document.querySelector<HTMLElement>(`.node[data-node="${id}"]`),
+    agentEl: (who) => document.querySelector<HTMLElement>(`.presence.${who.toLowerCase()} .portrait-stage`),
+    inputEl: () => document.querySelector<HTMLElement>(".talk-field"),
+  });
 
   return (
     <div className="app" data-mode={mode}>
@@ -186,13 +175,15 @@ export function App() {
             name="Sharee"
             side="left"
             state={agentState}
-            expression={EXPRESSIONS[exprIndex.Sharee]!}
+            mood={presence.Sharee.mood}
+            gaze={presence.Sharee.gaze}
+            reduced={reduced}
             active={hoverAgent === "Sharee"}
             onHover={(on) => setHoverAgent(on ? "Sharee" : null)}
-            onCycle={() => cycleExpression("Sharee")}
+            onGreet={() => setGreetAt((g) => ({ ...g, Sharee: performance.now() }))}
           />
-          <div className="core" data-active={interactiveActivity > 0}>
-            <NeuralCore motion={motion} reduced={reduced} activity={interactiveActivity} focus={coreFocus} />
+          <div className="core" data-active={coreActivity > 0}>
+            <NeuralCore motion={motion} reduced={reduced} activity={coreActivity} focus={coreFocus} />
             <svg className="links" viewBox="0 0 600 400" preserveAspectRatio="none" aria-hidden="true">
               <circle className="hud-ring" cx="300" cy="200" r="108" />
               {nodes.map((n) => {
@@ -211,19 +202,16 @@ export function App() {
             <button
               type="button"
               className="core-label"
-              aria-label="Collective Intelligence Core (click to pulse)"
-              onPointerEnter={() => setCoreHover(true)}
-              onPointerLeave={() => setCoreHover(false)}
-              onClick={() => setCorePulse(0.95)}
+              aria-label="Collective Intelligence Core (click to send a ripple)"
             >
               <Icon name="wave" size={24} />
               <strong><SplitText text="COLLECTIVE" delay={300} stagger={30} /><SplitText text="INTELLIGENCE" delay={420} stagger={30} /></strong>
               <span><ScrambleText text="SHAREE" delay={700} className="c-sharee" /> × <ScrambleText text="NEXA" delay={760} className="c-nexa" /></span>
               <b className="inf">∞</b>
-              <em><RollText value={interactiveActivity > 0 ? "PREVIEW" : "IDLE"} /></em>
+              <em><RollText value={coreActivity > 0 ? "ACTIVE" : "IDLE"} /></em>
             </button>
             {nodes.map((n) => (
-              <button key={n.id} className={`node ${n.pos}`} data-spot onClick={() => setNode(n.id)} aria-pressed={node === n.id}
+              <button key={n.id} className={`node ${n.pos}`} data-node={n.id} data-spot onClick={() => setNode(n.id)} aria-pressed={node === n.id}
                 onPointerEnter={() => setHoverNode(n.id)} onPointerLeave={() => setHoverNode(null)} onFocus={() => setHoverNode(n.id)} onBlur={() => setHoverNode(null)}>
                 <Icon name={n.icon} size={15} /><span>{n.id}</span>
               </button>
@@ -233,10 +221,12 @@ export function App() {
             name="Nexa"
             side="right"
             state={agentState}
-            expression={EXPRESSIONS[exprIndex.Nexa]!}
+            mood={presence.Nexa.mood}
+            gaze={presence.Nexa.gaze}
+            reduced={reduced}
             active={hoverAgent === "Nexa"}
             onHover={(on) => setHoverAgent(on ? "Nexa" : null)}
-            onCycle={() => cycleExpression("Nexa")}
+            onGreet={() => setGreetAt((g) => ({ ...g, Nexa: performance.now() }))}
           />
           <nav className="modes" aria-label="Workspace mode" ref={modesRef}>
             <span className="mode-ink" aria-hidden="true" />
@@ -268,7 +258,7 @@ export function App() {
             </div>
           ))}
         </section>
-        <Dock />
+        <Dock onDraft={setDraft} onSend={() => setSentAt(performance.now())} />
       </main>
       {node && <Inspector node={nodes.find((n) => n.id === node)!} onClose={() => setNode(null)} />}
       {palette && (
@@ -433,76 +423,73 @@ function Presence({
   name,
   side,
   state,
-  expression,
+  mood,
+  gaze,
+  reduced,
   active,
   onHover,
-  onCycle,
+  onGreet,
 }: {
-  name: "Sharee" | "Nexa";
+  name: Agent;
   side: "left" | "right";
   state: PresenceState;
-  expression: { key: ExpressionKey; label: string };
+  mood: Mood;
+  gaze: () => Gaze;
+  reduced: boolean;
   active: boolean;
   onHover: (hovering: boolean) => void;
-  onCycle: () => void;
+  onGreet: () => void;
 }) {
-  const src = PORTRAITS[name][expression.key];
-  const previewing = expression.key !== "neutral";
-  // The waveform only moves for real audio; hover and expression previews never fake it.
+  const live = ATLAS[name] !== null;
+  // The waveform only moves for real audio; hover and moods never fake it.
   const liveMotion = state === "speaking" || state === "listening";
-  const statusTag = state === "offline"
-    ? (previewing ? expression.label.toUpperCase() : "NO MODEL")
-    : "LIVE";
+  const statusTag = state === "offline" ? "NO MODEL" : "LIVE";
+  const moodLabel = MOOD_LABEL[mood];
   const stageRef = useRef<HTMLButtonElement>(null);
 
   const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
     const el = stageRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const nx = ((e.clientX - r.left) / Math.max(1, r.width)) * 2 - 1;
-    const ny = ((e.clientY - r.top) / Math.max(1, r.height)) * 2 - 1;
-    el.style.setProperty("--hx", nx.toFixed(3));
-    el.style.setProperty("--hy", ny.toFixed(3));
-    el.style.setProperty("--hpx", `${(((nx + 1) * 0.5) * 100).toFixed(1)}%`);
-    el.style.setProperty("--hpy", `${(((ny + 1) * 0.5) * 100).toFixed(1)}%`);
-  };
-
-  const resetPointer = () => {
-    const el = stageRef.current;
-    if (!el) return;
-    el.style.setProperty("--hx", "0");
-    el.style.setProperty("--hy", "0");
+    el.style.setProperty("--hpx", `${(((e.clientX - r.left) / Math.max(1, r.width)) * 100).toFixed(1)}%`);
+    el.style.setProperty("--hpy", `${(((e.clientY - r.top) / Math.max(1, r.height)) * 100).toFixed(1)}%`);
   };
 
   return (
     <div
-      className={`presence ${side} ${name.toLowerCase()} ${active ? "is-active" : ""} ${previewing ? "is-preview" : ""}`}
+      className={`presence ${side} ${name.toLowerCase()} ${active ? "is-active" : ""} ${live ? "is-live" : ""}`}
+      data-mood={mood}
       onPointerEnter={() => onHover(true)}
-      onPointerLeave={() => { onHover(false); resetPointer(); }}
+      onPointerLeave={() => onHover(false)}
     >
       <div className="aura" />
       <button
         ref={stageRef}
         type="button"
         className="portrait-stage"
-        onClick={onCycle}
+        onClick={onGreet}
         onPointerMove={handlePointerMove}
-        aria-label={`${name} avatar (${expression.label}) — click to preview expressions`}
-        title={`Click to cycle ${name}'s expressions`}
+        aria-label={`${name}, ${moodLabel.toLowerCase()}. Click to say hello.`}
       >
         <span className="holo-spot" aria-hidden="true" />
         <span className="holo-ring" aria-hidden="true" />
-        <span className="holo-scan" aria-hidden="true" />
-        <img key={expression.key} className="portrait" src={src} alt={`${name} ${expression.label} portrait`} draggable={false} />
+        <LiveFace
+          atlas={ATLAS[name]}
+          fallback={FALLBACK[name]}
+          mood={mood}
+          gaze={gaze}
+          temperament={TEMPERAMENT[name]}
+          reduced={reduced}
+          label={`${name} portrait`}
+        />
         <span className="holo-hud" aria-hidden="true">
-          <b>{expression.label}</b>
-          <i>Click to switch</i>
+          <b><RollText value={moodLabel} /></b>
         </span>
       </button>
       <div className="who">
         <SplitText as="h2" className="agent-name" text={name.toUpperCase()} delay={side === "left" ? 620 : 720} stagger={55} />
         <p className="agent-status">
-          <span className={`dot ${state === "offline" ? (active || previewing ? "preview" : "off") : "on"}`} />
+          <span className={`dot ${state === "offline" ? (active ? "preview" : "off") : "on"}`} />
           <RollText value={state === "offline" ? "Standby" : presenceLabel[state]} />
           <i>·</i>
           <ScrambleText text={statusTag} delay={400} className="mono" />
@@ -701,17 +688,17 @@ function AwarenessPanel({ perms, setPerms, sys }: { perms: PermissionsView | nul
   );
 }
 
-function Dock() {
+function Dock({ onDraft, onSend }: { onDraft: (text: string) => void; onSend: () => void }) {
   const [text, setText] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const hint = useCycle(["Talk to Sharee, Nexa, or both…", "Ask Nexa to plan your morning…", "Ask Sharee to review your project…", "Ask both to debate an idea…"], 4200);
   return (
     <footer className="dock">
       <div className="talk-wrap">
-        <form className="talk" onSubmit={(e) => { e.preventDefault(); if (text.trim()) setNote("Connect a model provider in Intelligence to talk to Sharee and Nexa."); }}>
+        <form className="talk" onSubmit={(e) => { e.preventDefault(); if (text.trim()) { onSend(); setNote("Connect a model provider in Intelligence to talk to Sharee and Nexa."); } }}>
           <Icon name="wave" size={24} />
           <span className="talk-field">
-            <input value={text} onChange={(e) => { setText(e.target.value); setNote(null); }} aria-label="Message to Sharee and Nexa" />
+            <input value={text} onChange={(e) => { setText(e.target.value); onDraft(e.target.value); setNote(null); }} aria-label="Message to Sharee and Nexa" />
             {!text && <span className="talk-hint" aria-hidden="true"><RollText value={hint} /></span>}
           </span>
           <button type="button" className="mic" aria-label="Voice (microphone permission off)" disabled><Icon name="mic" size={22} /></button>

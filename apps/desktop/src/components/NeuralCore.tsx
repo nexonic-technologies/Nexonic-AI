@@ -11,6 +11,13 @@ import type { MotionLevel } from "@nexonic/design-system";
  * The torus leans toward the cursor; hovering a cognitive node steers the
  * bands to that node's sector.
  *
+ * Cursor interaction (direct response to the user's pointer, never reported
+ * as activity): filaments bend toward the cursor like a magnetic field, rim
+ * needles turn to point at it, sparks swirl around it, and a click sends a
+ * shockwave through the whole weave. Dragging anywhere on the stage spins the
+ * torus in 3D with momentum while Sharee's band follows the hand; on release
+ * it glides and settles back to its resting pose.
+ *
  * `activity` (0–1) must come from real events. At 0 only the slow idle drift
  * runs, which is decorative.
  */
@@ -81,6 +88,11 @@ export function NeuralCore({
       uBase: { value: new THREE.Color("#a9c6ff") },
       uPixel: { value: dpr },
       uLight: { value: 0 },
+      uClock: { value: 0 },
+      uPtr: { value: new THREE.Vector3(9, 9, 0) },
+      uPtrK: { value: 0 },
+      uPtrVel: { value: new THREE.Vector2(0, 0) },
+      uRip: { value: [0, 1, 2, 3].map(() => new THREE.Vector4(0, 0, -99, 0)) },
     };
 
     const bandGLSL = /* glsl */ `
@@ -92,6 +104,32 @@ export function NeuralCore({
         float s = exp(-pow(wrapd(theta, uBand) / w, 2.0));
         float n = exp(-pow(wrapd(theta, uBand + 3.14159265) / w, 2.0));
         return vec2(s, n);
+      }
+      uniform float uClock, uPtrK;
+      uniform vec3 uPtr;
+      uniform vec2 uPtrVel;
+      uniform vec4 uRip[4];
+      // Pointer field in rig space: magnetic pull + swirl + wake, plus click shockwaves.
+      vec3 field(vec3 p, out float glow){
+        vec3 d = uPtr - p;
+        float dist = length(d);
+        float f = uPtrK * exp(-dist * dist / 0.9);
+        vec3 dir = d / max(dist, 1e-3);
+        vec3 disp = dir * f * 0.22 * smoothstep(0.0, 0.6, dist);
+        disp += vec3(-d.y, d.x, 0.0) * f * 0.16;
+        disp += vec3(uPtrVel, 0.0) * f * 0.35;
+        glow = f * 0.7;
+        for (int i = 0; i < 4; i++) {
+          float age = uClock - uRip[i].z;
+          if (age > 0.0 && age < 2.4) {
+            vec2 rv = p.xy - uRip[i].xy;
+            float rd = length(rv);
+            float w = exp(-pow((rd - age * 2.4) / 0.16, 2.0)) * pow(1.0 - age / 2.4, 1.5) * uRip[i].w;
+            disp += vec3(rv / max(rd, 1e-3), 0.35) * w * 0.22;
+            glow += w * 0.5;
+          }
+        }
+        return disp;
       }
       vec3 tint(vec2 b){ vec3 c = uBase * 0.85; c = mix(c, uSharee * 1.3, clamp(b.x * 1.25, 0.0, 1.0)); c = mix(c, uNexa * 1.3, clamp(b.y * 1.25, 0.0, 1.0)); return c; }
     `;
@@ -152,10 +190,12 @@ export function NeuralCore({
           vec2 b = bands(aTheta);
           float speed = 0.18 + aSeed * 0.25 + uActivity * 0.9;
           float pulse = pow(0.5 + 0.5 * sin((aU * 6.0 - uTime * speed * 6.0 + aSeed * 40.0)), 8.0);
-          vCol = tint(b);
+          float g;
+          vec3 p = position + field(position, g);
+          vCol = tint(b) + vec3(0.35, 0.45, 0.6) * g;
           float edge = smoothstep(0.0, 0.08, aU) * smoothstep(1.0, 0.92, aU);
-          vA = edge * (0.07 + 0.22 * pulse + 0.32 * (b.x + b.y)) * (1.0 + uActivity * 0.8) * mix(1.0, 1.6, uLight);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          vA = edge * (0.07 + 0.22 * pulse + 0.32 * (b.x + b.y) + 0.55 * g) * (1.0 + uActivity * 0.8) * mix(1.0, 1.6, uLight);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         }`,
       fragmentShader: /* glsl */ `
         uniform float uLight;
@@ -201,10 +241,14 @@ export function NeuralCore({
           float k = b.x + b.y;
           vec3 c = vec3(cos(aTheta), sin(aTheta), 0.0);
           vec3 n = normalize(position - c * ${R.toFixed(2)});
-          float grow = aLen * (0.18 + 1.6 * k + uActivity * 0.6);
-          vec3 p = position + n * grow * aTip;
-          vCol = tint(b);
-          vA = mix(0.5, 0.0, aTip) * (0.15 + 0.85 * k);
+          float g;
+          vec3 base = position + field(position, g);
+          vec3 toPtr = normalize(uPtr - base + vec3(1e-4));
+          vec3 dirN = normalize(mix(n, toPtr, clamp(g * 1.6, 0.0, 0.9)));
+          float grow = aLen * (0.18 + 1.6 * k + uActivity * 0.6 + 1.4 * g);
+          vec3 p = base + dirN * grow * aTip;
+          vCol = tint(b) + vec3(0.3, 0.4, 0.55) * g;
+          vA = mix(0.5, 0.0, aTip) * (0.15 + 0.85 * k + 0.9 * g);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         }`,
       fragmentShader: /* glsl */ `
@@ -240,8 +284,10 @@ export function NeuralCore({
           float rr = ${r.toFixed(2)} * (0.9 + aSeed.z * 0.35);
           vec3 p = vec3((${R.toFixed(2)} + rr * cos(ph)) * cos(th), (${R.toFixed(2)} + rr * cos(ph)) * sin(th), rr * sin(ph));
           vec2 b = bands(th);
-          vCol = tint(b) + vec3(0.2);
-          vA = (0.25 + 0.75 * (b.x + b.y)) * (0.4 + aSeed.z * 0.6);
+          float g;
+          p += field(p, g) * 1.6;
+          vCol = tint(b) + vec3(0.2) + vec3(0.3, 0.4, 0.5) * g;
+          vA = (0.25 + 0.75 * (b.x + b.y) + g) * (0.4 + aSeed.z * 0.6);
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_PointSize = (1.0 + aSeed.z * 2.2 + (b.x + b.y) * 1.5) * uPixel * (7.4 / -mv.z);
           gl_Position = projectionMatrix * mv;
@@ -265,12 +311,88 @@ export function NeuralCore({
 
     const target = new THREE.Vector2(0, 0);
     const lean = new THREE.Vector2(0, 0);
+    // cursor in normalised device coords of this canvas (null when outside the window)
+    const ndc = new THREE.Vector2(9, 9);
+    let ptrInside = false;
+    const ray = new THREE.Raycaster();
+    const plane = new THREE.Plane();
+    const hit = new THREE.Vector3();
+    const local = new THREE.Vector3();
+    const prevLocal = new THREE.Vector3();
+    const normal = new THREE.Vector3();
+    let ripIndex = 0;
+    const toNdc = (e: PointerEvent) => {
+      const rc = el.getBoundingClientRect();
+      return [((e.clientX - rc.left) / rc.width) * 2 - 1, -(((e.clientY - rc.top) / rc.height) * 2 - 1)] as const;
+    };
     const onMove = (e: PointerEvent) => {
       const rc = el.getBoundingClientRect();
       target.set(((e.clientX - rc.left) / rc.width) * 2 - 1, ((e.clientY - rc.top) / rc.height) * 2 - 1);
       target.clampScalar(-1.2, 1.2);
+      const [x, y] = toNdc(e);
+      ndc.set(x, y);
+      ptrInside = true;
+    };
+    const onLeave = () => { ptrInside = false; };
+    const pointerLocal = (out: THREE.Vector3) => {
+      ray.setFromCamera(ndc, camera);
+      normal.set(0, 0, 1).applyQuaternion(rig.quaternion);
+      plane.setFromNormalAndCoplanarPoint(normal, rig.position);
+      if (!ray.ray.intersectPlane(plane, hit)) return false;
+      out.copy(hit);
+      rig.worldToLocal(out);
+      return true;
+    };
+    // drag-to-spin: works anywhere on the stage except on controls
+    const stage = el.closest<HTMLElement>(".stage") ?? el;
+    const spin = new THREE.Vector2(0, 0); // accumulated drag rotation (radians)
+    const spinVel = new THREE.Vector2(0, 0);
+    let drag: { x: number; y: number; moved: number; t: number } | null = null;
+    let bandFollow: number | null = null;
+    const ripple = (e: PointerEvent) => {
+      const rc = el.getBoundingClientRect();
+      if (e.clientX < rc.left || e.clientX > rc.right || e.clientY < rc.top || e.clientY > rc.bottom) return;
+      const [x, y] = toNdc(e);
+      ndc.set(x, y);
+      const p = new THREE.Vector3();
+      if (!pointerLocal(p) || p.length() > R + r * 3) return;
+      shared.uRip.value[ripIndex % 4]!.set(p.x, p.y, shared.uClock.value, 1);
+      ripIndex++;
+    };
+    const onDown = (e: PointerEvent) => {
+      if (reduced || e.button !== 0) return;
+      const t = e.target as HTMLElement | null;
+      if (!t || !stage.contains(t) || t.closest("button:not(.core-label), a, input, textarea, select, .presence")) return;
+      drag = { x: e.clientX, y: e.clientY, moved: 0, t: performance.now() };
+      spinVel.set(0, 0);
+      stage.dataset.dragging = "true";
+    };
+    const onDragMove = (e: PointerEvent) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.x;
+      const dy = e.clientY - drag.y;
+      const now = performance.now();
+      const dt = Math.max((now - drag.t) / 1000, 1 / 240);
+      drag = { x: e.clientX, y: e.clientY, moved: drag.moved + Math.hypot(dx, dy), t: now };
+      const k = 0.0065;
+      spin.x += dy * k;
+      spin.y += dx * k;
+      spinVel.set((dy * k) / dt, (dx * k) / dt).clampScalar(-9, 9);
+      if (drag.moved > 6 && pointerLocal(local)) bandFollow = Math.atan2(local.y, local.x);
+    };
+    const onUp = (e: PointerEvent) => {
+      if (!drag) return;
+      if (drag.moved < 6) ripple(e);
+      drag = null;
+      bandFollow = null;
+      delete stage.dataset.dragging;
     };
     window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointermove", onDragMove);
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    document.documentElement.addEventListener("pointerleave", onLeave);
 
     // follow the nearest theme scope (the presence stage stays dark in both themes)
     const scope = el.closest<HTMLElement>("[data-theme]") ?? document.documentElement;
@@ -294,7 +416,7 @@ export function NeuralCore({
       const t = (shared.uTime.value += reduced ? dt * 0.15 : dt);
       shared.uActivity.value += (activityRef.current - shared.uActivity.value) * Math.min(dt * 2.5, 1);
 
-      const want = focusRef.current ? NODE_ANGLES[focusRef.current] : undefined;
+      const want = bandFollow ?? (focusRef.current ? NODE_ANGLES[focusRef.current] : undefined);
       if (want !== undefined) {
         const d = Math.atan2(Math.sin(want - band), Math.cos(want - band));
         band += d * Math.min(dt * 4, 1);
@@ -303,10 +425,36 @@ export function NeuralCore({
       }
       shared.uBand.value = band;
 
+      shared.uClock.value += dt;
+      // pointer field strength fades in near the core and out when the cursor leaves
+      let wantK = 0;
+      if (ptrInside && !reduced && pointerLocal(local)) {
+        const dist = Math.hypot(local.x, local.y);
+        wantK = 1 - THREE.MathUtils.smoothstep(dist, R + r * 1.2, R + r * 4.5);
+        const vx = (local.x - prevLocal.x) / Math.max(dt, 1e-3);
+        const vy = (local.y - prevLocal.y) / Math.max(dt, 1e-3);
+        shared.uPtrVel.value.lerp(new THREE.Vector2(THREE.MathUtils.clamp(vx * 0.08, -0.6, 0.6), THREE.MathUtils.clamp(vy * 0.08, -0.6, 0.6)), Math.min(dt * 6, 1));
+        prevLocal.copy(local);
+        shared.uPtr.value.lerp(local, Math.min(dt * 10, 1));
+      } else {
+        shared.uPtrVel.value.multiplyScalar(0.9);
+      }
+      shared.uPtrK.value += (wantK - shared.uPtrK.value) * Math.min(dt * 4, 1);
+
+      // momentum after release, then a soft spring back to the resting pose
+      if (!drag) {
+        spin.x += spinVel.x * dt;
+        spin.y += spinVel.y * dt;
+        spinVel.multiplyScalar(Math.exp(-dt * 2.2));
+        spin.multiplyScalar(Math.exp(-dt * 0.9));
+      }
+      // wake: the weave stretches along the drag direction
+      if (drag) shared.uPtrVel.value.set(THREE.MathUtils.clamp(spinVel.y * 0.08, -0.6, 0.6), THREE.MathUtils.clamp(-spinVel.x * 0.08, -0.6, 0.6));
+
       lean.lerp(target, Math.min(dt * 3, 1));
-      // near face-on so the label sits in the ring; slow tumble + cursor lean
-      rig.rotation.x = -0.32 + Math.sin(t * 0.11) * 0.1 + lean.y * 0.18;
-      rig.rotation.y = 0.18 + Math.sin(t * 0.07) * 0.14 + lean.x * 0.24;
+      // near face-on so the label sits in the ring; slow tumble + cursor lean + drag spin
+      rig.rotation.x = -0.32 + Math.sin(t * 0.11) * 0.1 + lean.y * 0.18 + spin.x;
+      rig.rotation.y = 0.18 + Math.sin(t * 0.07) * 0.14 + lean.x * 0.24 + spin.y;
       rig.rotation.z = t * 0.035;
       renderer.render(scene, camera);
     };
@@ -317,6 +465,11 @@ export function NeuralCore({
       ro.disconnect();
       themeObs.disconnect();
       window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointermove", onDragMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      document.documentElement.removeEventListener("pointerleave", onLeave);
       document.removeEventListener("visibilitychange", onVis);
       [lineGeo, spikeGeo, dustGeo].forEach((g) => g.dispose());
       [lineMat, spikeMat, dustMat].forEach((m) => m.dispose());
