@@ -8,17 +8,17 @@ Status: ✅ done · 🔶 in progress · ⛔ blocked · ⬜ pending
 | M01 | Development tooling and integrations | ✅ |
 | M02 | Research, reference analysis, repository and Stark AI audits | ✅ |
 | M03 | Repository initialization and security baseline | ✅ |
-| M04 | Cognitive, technical, security and commercial architecture | 🔶 |
+| M04 | Cognitive, technical, security and commercial architecture | ✅ |
 
 ## Phase B — Premium visual design
 | | Milestone | Status |
 |---|---|---|
-| M05 | Creative direction and design coverage matrix | 🔶 design system recorded |
-| M06 | Design system, typography, motion primitives | ⬜ |
-| M07 | Native desktop shell and navigation | ⬜ |
+| M05 | Creative direction and design coverage matrix | ✅ |
+| M06 | Design system, typography, motion primitives | ✅ tokens, themes, motion levels |
+| M07 | Native desktop shell and navigation | 🔶 shell + dashboard; other sections next |
 | M08 | Dual and individual presence | ⬜ |
 | M09 | Adaptive Visual Hub | ⬜ |
-| M10 | Collective Intelligence neural core | ⬜ |
+| M10 | Collective Intelligence neural core | 🔶 rendering done; real event wiring with M16 |
 | M11 | Cognitive Memory and Evolution Studios | ⬜ |
 | M12 | Awareness, Activity, Computer Control interfaces | ⬜ |
 | M13 | Voice and Personality Studios | ⬜ |

@@ -9,7 +9,7 @@ to its implementation files, backing functionality and verification tests:
 
 | No. | Environment | Implementation | Backend | Tests | Status |
 |---|---|---|---|---|---|
-| 01 | Dual Presence | — | — | — | ⬜ |
+| 01 | Dual Presence | `apps/desktop/src/App.tsx`, `NeuralCore.tsx`, `styles/app.css` | system_info, permissions, memory_summary | Rust unit tests; screenshot review | 🔶 |
 | 02 | Individual Presence — Sharee | — | — | — | ⬜ |
 | 03 | Individual Presence — Nexa | — | — | — | ⬜ |
 | 04 | Three-Way Group Conversation | — | — | — | ⬜ |
@@ -23,7 +23,7 @@ to its implementation files, backing functionality and verification tests:
 | 12 | Voice Studio | — | — | — | ⬜ |
 | 13 | Personality Studio | — | — | — | ⬜ |
 | 14 | Intelligence Center | — | — | — | ⬜ |
-| 15 | Privacy & Permissions Center | — | `crates/permissions` | — | ⬜ |
+| 15 | Privacy & Permissions Center | Awareness panel (partial) | `crates/permissions` | unit tests | 🔶 |
 | 16 | Ambient Assistant | — | — | — | ⬜ |
 | 17 | Your World | — | — | — | ⬜ |
 | 18 | Settings | — | — | — | ⬜ |

@@ -37,7 +37,12 @@ in `DEPENDENCY_LICENSES.md` and the file header.
 | A5 | OpenRouter first, free models only by default, paid usage requires explicit opt-in | Cost control, matches owner rule | Single fixed model |
 | A6 | Release builds on GitHub-hosted macOS (Apple Silicon) runners; Developer ID signing and notarization only when credentials are provided as repository secrets | Reproducible, auditable builds | Local-only builds |
 
-## 4. Open questions for the owner
+## 4. Owner decisions (26 Nov 2026)
 
-- Project license (none chosen yet — nothing is assumed).
+- Licence: AGPL-3.0-only; owner keeps dual-licensing rights as sole copyright holder.
+- Platform: macOS (Apple Silicon) only until the product is final.
+- Dependency updates: no bot-authored PRs; weekly `Dependency audit` workflow, fixes committed by the owner.
+
+## 5. Open questions for the owner
+
 - Apple Developer ID certificate and notarization credentials, when distribution starts.

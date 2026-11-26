@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/permissions", "crates/memory-engine"]
+members = ["crates/permissions", "crates/memory-engine", "apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -8,6 +8,7 @@ edition = "2021"
 rust-version = "1.80"
 authors = ["Nexonic Technologies"]
 publish = false
+license = "AGPL-3.0-only"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
