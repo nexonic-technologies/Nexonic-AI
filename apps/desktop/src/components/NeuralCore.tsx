@@ -1,190 +1,312 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { motion as motionTokens, type MotionLevel } from "@nexonic/design-system";
+import type { MotionLevel } from "@nexonic/design-system";
 
 /**
- * Collective Intelligence core: interlaced orbital shells of particles.
- * Sharee's cyan flows from the left, Nexa's amber from the right, and they meet
- * in the middle. `activity` (0–1) must come from real events; at 0 the core
- * shows only its slow idle drift, which is decorative and labelled as idle.
+ * Collective Intelligence core.
+ *
+ * A slowly tumbling torus woven from thousands of streamlines. Energy pulses
+ * flow along every filament. Two bands orbit the rim in opposite phase —
+ * Sharee's cyan and Nexa's amber — and push out radial spikes where they pass.
+ * The torus leans toward the cursor; hovering a cognitive node steers the
+ * bands to that node's sector.
+ *
+ * `activity` (0–1) must come from real events. At 0 only the slow idle drift
+ * runs, which is decorative.
  */
+
+export const NODE_ANGLES: Record<string, number> = {
+  Reasoning: 2.35, Perception: 0.8, Memory: 2.95, Planning: 0.2, Learning: 3.75, Action: -0.6,
+};
+
+const BUDGET: Record<MotionLevel, { lines: number; seg: number; spikes: number; dust: number }> = {
+  off: { lines: 0, seg: 0, spikes: 0, dust: 0 },
+  minimal: { lines: 260, seg: 48, spikes: 500, dust: 600 },
+  balanced: { lines: 620, seg: 64, spikes: 1100, dust: 1500 },
+  cinematic: { lines: 1100, seg: 80, spikes: 1800, dust: 2600 },
+};
+
+const R = 1.72; // major radius
+const r = 0.56; // tube radius
+
 export function NeuralCore({
   activity = 0,
   motion = "balanced",
   reduced = false,
+  focus = null,
 }: {
   activity?: number;
   motion?: MotionLevel;
   reduced?: boolean;
+  focus?: string | null;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const activityRef = useRef(activity);
+  const focusRef = useRef<string | null>(focus);
   activityRef.current = activity;
+  focusRef.current = focus;
 
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    const count = reduced ? 1600 : motionTokens.particles[motion];
-    if (count === 0) return;
+    const level: MotionLevel = reduced && motion !== "off" ? "minimal" : motion;
+    const B = BUDGET[level];
+    if (B.lines === 0) return;
 
     let renderer: THREE.WebGLRenderer;
     try {
-      renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: "high-performance" });
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
     } catch {
-      el.dataset.fallback = "true"; // CSS draws a static core
+      el.dataset.fallback = "true";
       return;
     }
     const dpr = Math.min(window.devicePixelRatio, 2);
     renderer.setPixelRatio(dpr);
+    renderer.setClearColor(0x000000, 0);
     el.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 50);
-    camera.position.set(0, 0, 5.7);
+    const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 50);
+    camera.position.set(0, 0, 7.4);
+    const rig = new THREE.Group(); // tilt + tumble
+    scene.add(rig);
 
-    // Each particle lives on one of several tilted orbital rings (a "shell").
-    const rings = 14;
-    const seed = new Float32Array(count * 4); // ring, phase, radius jitter, size
-    const pos = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      seed[i * 4] = i % rings;
-      seed[i * 4 + 1] = Math.random() * Math.PI * 2;
-      seed[i * 4 + 2] = (Math.random() - 0.5) * 0.16;
-      seed[i * 4 + 3] = Math.random() ** 3;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute("seed", new THREE.BufferAttribute(seed, 4));
-
-    const uniforms = {
+    const shared = {
       uTime: { value: 0 },
       uActivity: { value: 0 },
-      uPointer: { value: new THREE.Vector3(9, 9, 0) },
-      uPixel: { value: dpr },
+      uBand: { value: 0 },
       uSharee: { value: new THREE.Color("#00dec6") },
       uNexa: { value: new THREE.Color("#ffb568") },
-      uRings: { value: rings },
+      uBase: { value: new THREE.Color("#a9c6ff") },
+      uPixel: { value: dpr },
+      uLight: { value: 0 },
     };
 
-    const mat = new THREE.ShaderMaterial({
-      uniforms,
+    const bandGLSL = /* glsl */ `
+      uniform float uTime, uActivity, uBand, uLight;
+      uniform vec3 uSharee, uNexa, uBase;
+      float wrapd(float a, float b){ float d = mod(a - b + 3.14159265, 6.2831853) - 3.14159265; return abs(d); }
+      vec2 bands(float theta){
+        float w = 0.55 + uActivity * 0.25;
+        float s = exp(-pow(wrapd(theta, uBand) / w, 2.0));
+        float n = exp(-pow(wrapd(theta, uBand + 3.14159265) / w, 2.0));
+        return vec2(s, n);
+      }
+      vec3 tint(vec2 b){ vec3 c = uBase * 0.85; c = mix(c, uSharee * 1.3, clamp(b.x * 1.25, 0.0, 1.0)); c = mix(c, uNexa * 1.3, clamp(b.y * 1.25, 0.0, 1.0)); return c; }
+    `;
+
+    // ---------- Streamlines ----------
+    const segs = B.seg;
+    const lineCount = B.lines;
+    const vCount = lineCount * segs * 2;
+    const pos = new Float32Array(vCount * 3);
+    const aTheta = new Float32Array(vCount);
+    const aU = new Float32Array(vCount);
+    const aSeed = new Float32Array(vCount);
+    let vi = 0;
+    const p3 = (theta: number, phi: number, rr: number): [number, number, number] => [
+      (R + rr * Math.cos(phi)) * Math.cos(theta),
+      (R + rr * Math.cos(phi)) * Math.sin(theta),
+      rr * Math.sin(phi),
+    ];
+    for (let l = 0; l < lineCount; l++) {
+      const t0 = Math.random() * Math.PI * 2;
+      const span = 0.9 + Math.random() * 2.6;
+      const wind = (Math.random() < 0.5 ? -1 : 1) * (0.6 + Math.random() * 2.4);
+      const p0 = Math.random() * Math.PI * 2;
+      const rr = r * (0.55 + Math.random() * 0.5);
+      const seed = Math.random();
+      let prev = p3(t0, p0, rr);
+      for (let s = 1; s <= segs; s++) {
+        const u = s / segs;
+        const th = t0 + span * u;
+        const ph = p0 + span * wind * u + Math.sin(u * 9 + seed * 6) * 0.15;
+        const cur = p3(th, ph, rr * (1 + Math.sin(u * 5 + seed * 3) * 0.08));
+        const pair: [[number, number, number], number][] = [[prev, u - 1 / segs], [cur, u]];
+        for (const [pt, uu] of pair) {
+          pos.set(pt, vi * 3);
+          aTheta[vi] = Math.atan2(pt[1], pt[0]);
+          aU[vi] = uu;
+          aSeed[vi] = seed;
+          vi++;
+        }
+        prev = cur;
+      }
+    }
+    const lineGeo = new THREE.BufferGeometry();
+    lineGeo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    lineGeo.setAttribute("aTheta", new THREE.BufferAttribute(aTheta, 1));
+    lineGeo.setAttribute("aU", new THREE.BufferAttribute(aU, 1));
+    lineGeo.setAttribute("aSeed", new THREE.BufferAttribute(aSeed, 1));
+    const lineMat = new THREE.ShaderMaterial({
+      uniforms: shared,
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       vertexShader: /* glsl */ `
-        attribute vec4 seed;
-        uniform float uTime, uActivity, uPixel, uRings;
-        uniform vec3 uPointer;
-        varying float vMix;
-        varying float vAlpha;
-        mat3 rotX(float a){float c=cos(a),s=sin(a);return mat3(1.,0.,0.,0.,c,-s,0.,s,c);}
-        mat3 rotY(float a){float c=cos(a),s=sin(a);return mat3(c,0.,s,0.,1.,0.,-s,0.,c);}
-        mat3 rotZ(float a){float c=cos(a),s=sin(a);return mat3(c,-s,0.,s,c,0.,0.,0.,1.);}
+        ${bandGLSL}
+        attribute float aTheta, aU, aSeed;
+        varying vec3 vCol; varying float vA;
         void main(){
-          float r = seed.x / uRings;
-          float speed = 0.10 + 0.05 * fract(r * 7.13) + uActivity * 0.35;
-          float t = seed.y + uTime * speed * (mod(seed.x, 2.) < 1. ? 1. : -1.);
-          // lemniscate-ish orbit gives the woven, braided look
-          float rad = 1.55 + seed.z + 0.18 * sin(t * 3. + r * 6.2831);
-          vec3 p = vec3(cos(t) * rad, sin(t * 2.) * 0.22, sin(t) * rad);
-          p = rotZ(r * 3.1416 + 0.4) * rotX(r * 2.1 + uTime * 0.03) * rotY(uTime * 0.05) * p;
-          // pointer attraction in view space, soft and bounded
-          vec4 mv = modelViewMatrix * vec4(p, 1.);
-          vec3 d = uPointer - mv.xyz;
-          float pull = exp(-dot(d.xy, d.xy) * 1.6) * 0.35;
-          mv.xy += d.xy * pull;
-          gl_Position = projectionMatrix * mv;
-          float size = mix(1.6, 4.6, seed.w) * (1. + uActivity * 0.8);
-          gl_PointSize = size * uPixel * (5.7 / -mv.z);
-          vMix = smoothstep(-1.5, 1.5, p.x);
-          vAlpha = (0.35 + 0.65 * seed.w) * smoothstep(-3.0, 0.6, mv.z + 5.7);
+          vec2 b = bands(aTheta);
+          float speed = 0.18 + aSeed * 0.25 + uActivity * 0.9;
+          float pulse = pow(0.5 + 0.5 * sin((aU * 6.0 - uTime * speed * 6.0 + aSeed * 40.0)), 8.0);
+          vCol = tint(b);
+          float edge = smoothstep(0.0, 0.08, aU) * smoothstep(1.0, 0.92, aU);
+          vA = edge * (0.07 + 0.22 * pulse + 0.32 * (b.x + b.y)) * (1.0 + uActivity * 0.8) * mix(1.0, 1.6, uLight);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }`,
       fragmentShader: /* glsl */ `
-        uniform vec3 uSharee, uNexa;
-        uniform float uActivity;
-        varying float vMix;
-        varying float vAlpha;
-        void main(){
-          vec2 c = gl_PointCoord - .5;
-          float d = length(c);
-          float a = smoothstep(.5, 0., d);
-          vec3 col = mix(uSharee, uNexa, vMix);
-          col += vec3(1.) * smoothstep(.18, 0., d) * .35; // hot centre
-          gl_FragColor = vec4(col, a * vAlpha * (.9 + uActivity * .4));
-        }`,
+        uniform float uLight;
+        varying vec3 vCol; varying float vA;
+        void main(){ gl_FragColor = vec4(mix(vCol, vCol * 0.55, uLight), vA); }`,
     });
+    rig.add(new THREE.LineSegments(lineGeo, lineMat));
 
-    scene.add(new THREE.Points(geo, mat));
-
-    // Woven filaments: tilted orbital loops, vertex-coloured cyan → amber.
-    const filaments = new THREE.Group();
-    const loopMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false });
-    const cS = new THREE.Color("#00dec6"), cN = new THREE.Color("#ffb568");
-    const loops = reduced ? 10 : 26;
-    const loopGeos: THREE.BufferGeometry[] = [];
-    for (let k = 0; k < loops; k++) {
-      const n = 220, pts = new Float32Array(n * 3), cols = new Float32Array(n * 3);
-      const rx = 1.45 + Math.random() * 0.35, ry = 0.55 + Math.random() * 0.9, wob = Math.random() * 0.25;
-      for (let i = 0; i < n; i++) {
-        const t = (i / n) * Math.PI * 2;
-        const v = new THREE.Vector3(Math.cos(t) * rx, Math.sin(t) * ry, Math.sin(t * 3) * wob);
-        pts.set([v.x, v.y, v.z], i * 3);
+    // ---------- Radial spikes on the outer rim ----------
+    const sCount = B.spikes;
+    const sPos = new Float32Array(sCount * 2 * 3);
+    const sTheta = new Float32Array(sCount * 2);
+    const sTip = new Float32Array(sCount * 2);
+    const sLen = new Float32Array(sCount * 2);
+    for (let i = 0; i < sCount; i++) {
+      const th = Math.random() * Math.PI * 2;
+      const ph = (Math.random() - 0.5) * 1.3;
+      const base = p3(th, ph, r * 0.98);
+      const len = 0.05 + Math.random() ** 2 * 0.55;
+      for (let k = 0; k < 2; k++) {
+        sPos.set(base, (i * 2 + k) * 3);
+        sTheta[i * 2 + k] = th;
+        sTip[i * 2 + k] = k;
+        sLen[i * 2 + k] = len;
       }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.BufferAttribute(pts, 3));
-      const line = new THREE.LineLoop(g, loopMat);
-      line.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, (k / loops) * Math.PI);
-      line.updateMatrix();
-      // colour by final x position so cyan sits left, amber right
-      const tmp = new THREE.Vector3();
-      for (let i = 0; i < n; i++) {
-        tmp.fromBufferAttribute(g.getAttribute("position") as THREE.BufferAttribute, i).applyMatrix4(line.matrix);
-        const c = cS.clone().lerp(cN, THREE.MathUtils.smoothstep(tmp.x, -1.4, 1.4));
-        cols.set([c.r, c.g, c.b], i * 3);
-      }
-      g.setAttribute("color", new THREE.BufferAttribute(cols, 3));
-      loopGeos.push(g);
-      filaments.add(line);
     }
-    scene.add(filaments);
+    const spikeGeo = new THREE.BufferGeometry();
+    spikeGeo.setAttribute("position", new THREE.BufferAttribute(sPos, 3));
+    spikeGeo.setAttribute("aTheta", new THREE.BufferAttribute(sTheta, 1));
+    spikeGeo.setAttribute("aTip", new THREE.BufferAttribute(sTip, 1));
+    spikeGeo.setAttribute("aLen", new THREE.BufferAttribute(sLen, 1));
+    const spikeMat = new THREE.ShaderMaterial({
+      uniforms: shared,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexShader: /* glsl */ `
+        ${bandGLSL}
+        attribute float aTheta, aTip, aLen;
+        varying vec3 vCol; varying float vA;
+        void main(){
+          vec2 b = bands(aTheta);
+          float k = b.x + b.y;
+          vec3 c = vec3(cos(aTheta), sin(aTheta), 0.0);
+          vec3 n = normalize(position - c * ${R.toFixed(2)});
+          float grow = aLen * (0.18 + 1.6 * k + uActivity * 0.6);
+          vec3 p = position + n * grow * aTip;
+          vCol = tint(b);
+          vA = mix(0.5, 0.0, aTip) * (0.15 + 0.85 * k);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform float uLight;
+        varying vec3 vCol; varying float vA;
+        void main(){ gl_FragColor = vec4(mix(vCol, vCol * 0.55, uLight), vA); }`,
+    });
+    rig.add(new THREE.LineSegments(spikeGeo, spikeMat));
+
+    // ---------- Sparks riding the tube ----------
+    const dCount = B.dust;
+    const dPos = new Float32Array(dCount * 3);
+    const dSeed = new Float32Array(dCount * 3);
+    for (let i = 0; i < dCount; i++) {
+      dSeed.set([Math.random() * Math.PI * 2, Math.random() * Math.PI * 2, Math.random()], i * 3);
+    }
+    const dustGeo = new THREE.BufferGeometry();
+    dustGeo.setAttribute("position", new THREE.BufferAttribute(dPos, 3));
+    dustGeo.setAttribute("aSeed", new THREE.BufferAttribute(dSeed, 3));
+    const dustMat = new THREE.ShaderMaterial({
+      uniforms: shared,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexShader: /* glsl */ `
+        ${bandGLSL}
+        uniform float uPixel;
+        attribute vec3 aSeed;
+        varying vec3 vCol; varying float vA;
+        void main(){
+          float th = aSeed.x + uTime * (0.05 + aSeed.z * 0.08) * (1.0 + uActivity * 2.0);
+          float ph = aSeed.y + uTime * (0.3 + aSeed.z * 0.5);
+          float rr = ${r.toFixed(2)} * (0.9 + aSeed.z * 0.35);
+          vec3 p = vec3((${R.toFixed(2)} + rr * cos(ph)) * cos(th), (${R.toFixed(2)} + rr * cos(ph)) * sin(th), rr * sin(ph));
+          vec2 b = bands(th);
+          vCol = tint(b) + vec3(0.2);
+          vA = (0.25 + 0.75 * (b.x + b.y)) * (0.4 + aSeed.z * 0.6);
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          gl_PointSize = (1.0 + aSeed.z * 2.2 + (b.x + b.y) * 1.5) * uPixel * (7.4 / -mv.z);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */ `
+        varying vec3 vCol; varying float vA;
+        void main(){ float d = length(gl_PointCoord - 0.5); gl_FragColor = vec4(vCol, vA * smoothstep(0.5, 0.0, d)); }`,
+    });
+    rig.add(new THREE.Points(dustGeo, dustMat));
 
     const resize = () => {
       const { width, height } = el.getBoundingClientRect();
       renderer.setSize(width, height, false);
       camera.aspect = width / Math.max(height, 1);
+      camera.position.z = 8.3 * Math.max(1, 1.05 / camera.aspect);
       camera.updateProjectionMatrix();
     };
     const ro = new ResizeObserver(resize);
     ro.observe(el);
     resize();
 
+    const target = new THREE.Vector2(0, 0);
+    const lean = new THREE.Vector2(0, 0);
     const onMove = (e: PointerEvent) => {
-      const r = el.getBoundingClientRect();
-      const x = ((e.clientX - r.left) / r.width) * 2 - 1;
-      const y = -(((e.clientY - r.top) / r.height) * 2 - 1);
-      // map NDC to view space at the core's depth
-      const h = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.z;
-      uniforms.uPointer.value.set(x * h * camera.aspect, y * h, -camera.position.z);
+      const rc = el.getBoundingClientRect();
+      target.set(((e.clientX - rc.left) / rc.width) * 2 - 1, ((e.clientY - rc.top) / rc.height) * 2 - 1);
+      target.clampScalar(-1.2, 1.2);
     };
-    const onLeave = () => uniforms.uPointer.value.set(9, 9, 0);
     window.addEventListener("pointermove", onMove);
-    el.addEventListener("pointerleave", onLeave);
+
+    // follow the nearest theme scope (the presence stage stays dark in both themes)
+    const scope = el.closest<HTMLElement>("[data-theme]") ?? document.documentElement;
+    const readTheme = () => { shared.uLight.value = scope.dataset.theme === "light" ? 1 : 0; };
+    readTheme();
+    const themeObs = new MutationObserver(readTheme);
+    themeObs.observe(scope, { attributes: true, attributeFilter: ["data-theme"] });
 
     let raf = 0;
     let last = performance.now();
-    let visible = true;
-    const vis = () => { visible = document.visibilityState === "visible"; };
-    document.addEventListener("visibilitychange", vis);
+    let visible = document.visibilityState === "visible";
+    const onVis = () => { visible = document.visibilityState === "visible"; last = performance.now(); };
+    document.addEventListener("visibilitychange", onVis);
+    let band = 1.2;
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
-      if (!visible) return; // suspend rendering in the background
+      if (!visible) return;
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
-      uniforms.uTime.value += reduced ? 0 : dt;
-      filaments.rotation.y = Math.sin(uniforms.uTime.value * 0.12) * 0.28;
-      filaments.rotation.z += reduced ? 0 : dt * 0.015;
-      uniforms.uActivity.value += (activityRef.current - uniforms.uActivity.value) * Math.min(dt * 3, 1);
+      const t = (shared.uTime.value += reduced ? dt * 0.15 : dt);
+      shared.uActivity.value += (activityRef.current - shared.uActivity.value) * Math.min(dt * 2.5, 1);
+
+      const want = focusRef.current ? NODE_ANGLES[focusRef.current] : undefined;
+      if (want !== undefined) {
+        const d = Math.atan2(Math.sin(want - band), Math.cos(want - band));
+        band += d * Math.min(dt * 4, 1);
+      } else {
+        band += dt * (0.32 + shared.uActivity.value * 1.4) * (reduced ? 0.2 : 1);
+      }
+      shared.uBand.value = band;
+
+      lean.lerp(target, Math.min(dt * 3, 1));
+      // near face-on so the label sits in the ring; slow tumble + cursor lean
+      rig.rotation.x = -0.32 + Math.sin(t * 0.11) * 0.1 + lean.y * 0.18;
+      rig.rotation.y = 0.18 + Math.sin(t * 0.07) * 0.14 + lean.x * 0.24;
+      rig.rotation.z = t * 0.035;
       renderer.render(scene, camera);
     };
     raf = requestAnimationFrame(frame);
@@ -192,13 +314,11 @@ export function NeuralCore({
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      themeObs.disconnect();
       window.removeEventListener("pointermove", onMove);
-      el.removeEventListener("pointerleave", onLeave);
-      document.removeEventListener("visibilitychange", vis);
-      geo.dispose();
-      loopGeos.forEach((g) => g.dispose());
-      loopMat.dispose();
-      mat.dispose();
+      document.removeEventListener("visibilitychange", onVis);
+      [lineGeo, spikeGeo, dustGeo].forEach((g) => g.dispose());
+      [lineMat, spikeMat, dustMat].forEach((m) => m.dispose());
       renderer.dispose();
       renderer.domElement.remove();
     };

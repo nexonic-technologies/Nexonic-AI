@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { presenceLabel, type MotionLevel, type PresenceState, type Theme } from "@nexonic/design-system";
 import { Icon, type IconName } from "./components/Icon";
 import { NeuralCore } from "./components/NeuralCore";
@@ -49,12 +49,27 @@ export function App() {
   const [section, setSection] = useState<Section>("presence");
   const [mode, setMode] = usePersisted<Mode>("mode", "world");
   const [node, setNode] = useState<Node | null>(null);
+  const [hoverNode, setHoverNode] = useState<Node | null>(null);
   const [palette, setPalette] = useState(false);
   const [sys, setSys] = useState<SystemInfo | null>(null);
   const [perms, setPerms] = useState<PermissionsView | null>(null);
   const [memoryCount, setMemoryCount] = useState<number | null>(null);
 
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  usePointerLight(reduced);
+  const modesRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const place = () => {
+      const nav = modesRef.current;
+      const b = nav?.querySelector<HTMLElement>('[aria-pressed="true"]');
+      const ink = nav?.querySelector<HTMLElement>(".mode-ink");
+      if (b && ink) { ink.style.width = `${b.offsetWidth}px`; ink.style.transform = `translateX(${b.offsetLeft}px)`; }
+    };
+    place();
+    void document.fonts?.ready.then(place);
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [mode]);
   useEffect(() => {
     void ipc.systemInfo().then(setSys);
     void ipc.permissions().then(setPerms);
@@ -79,10 +94,10 @@ export function App() {
       <Header onSearch={() => setPalette(true)} theme={theme} onTheme={() => setTheme(theme === "dark" ? "light" : "dark")} />
       <Sidebar section={section} onSection={setSection} sys={sys} />
       <main className="main">
-        <section className="stage" aria-label="Presence">
+        <section className="stage" aria-label="Presence" data-theme="dark">
           <Presence name="Sharee" side="left" state={agentState} />
           <div className="core">
-            <NeuralCore motion={motion} reduced={reduced} activity={0} />
+            <NeuralCore motion={motion} reduced={reduced} activity={0} focus={hoverNode ?? node} />
             <svg className="links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
               <path d="M22 13 H30 L38 22" /><path d="M78 13 H70 L62 22" />
               <path d="M16 36 H26 L33 42" /><path d="M84 36 H74 L67 42" />
@@ -96,13 +111,15 @@ export function App() {
               <em>Idle</em>
             </div>
             {NODES.map((n) => (
-              <button key={n.id} className={`node ${n.pos}`} onClick={() => setNode(n.id)} aria-pressed={node === n.id}>
+              <button key={n.id} className={`node ${n.pos}`} onClick={() => setNode(n.id)} aria-pressed={node === n.id}
+                onPointerEnter={() => setHoverNode(n.id)} onPointerLeave={() => setHoverNode(null)} onFocus={() => setHoverNode(n.id)} onBlur={() => setHoverNode(null)}>
                 <Icon name={n.icon} size={16} />{n.id}
               </button>
             ))}
           </div>
           <Presence name="Nexa" side="right" state={agentState} />
-          <nav className="modes" aria-label="Workspace mode">
+          <nav className="modes" aria-label="Workspace mode" ref={modesRef}>
+            <span className="mode-ink" aria-hidden="true" />
             {MODES.map((m) => (
               <button key={m.id} className="mode" aria-pressed={m.id === mode} onClick={() => setMode(m.id)}>
                 <Icon name={m.icon} size={16} />{m.label}
@@ -129,12 +146,38 @@ export function App() {
   );
 }
 
+/** Feeds the cursor into CSS: --px/--py (−1…1) on the app for parallax, and
+ *  --mx/--my (px) on the hovered [data-spot] element for its light. */
+function usePointerLight(reduced: boolean) {
+  useEffect(() => {
+    if (reduced) return;
+    const root = document.querySelector<HTMLElement>(".app");
+    let raf = 0;
+    let ev: PointerEvent | null = null;
+    const apply = () => {
+      raf = 0;
+      if (!ev || !root) return;
+      root.style.setProperty("--px", ((ev.clientX / innerWidth) * 2 - 1).toFixed(3));
+      root.style.setProperty("--py", ((ev.clientY / innerHeight) * 2 - 1).toFixed(3));
+      const spot = (ev.target as Element | null)?.closest?.<HTMLElement>("[data-spot]");
+      if (spot) {
+        const r = spot.getBoundingClientRect();
+        spot.style.setProperty("--mx", `${ev.clientX - r.left}px`);
+        spot.style.setProperty("--my", `${ev.clientY - r.top}px`);
+      }
+    };
+    const onMove = (e: PointerEvent) => { ev = e; if (!raf) raf = requestAnimationFrame(apply); };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => { window.removeEventListener("pointermove", onMove); cancelAnimationFrame(raf); };
+  }, [reduced]);
+}
+
 function Sidebar({ section, onSection, sys }: { section: Section; onSection: (s: Section) => void; sys: SystemInfo | null }) {
   return (
     <aside className="sidebar">
       <nav aria-label="Main">
         {NAV.map((n) => (
-          <button key={n.id} className="nav" aria-current={section === n.id ? "page" : undefined} onClick={() => onSection(n.id)}>
+          <button key={n.id} className="nav" data-spot aria-current={section === n.id ? "page" : undefined} onClick={() => onSection(n.id)}>
             <Icon name={n.icon} size={20} />
             <span><b>{n.title}</b><small>{n.sub}</small></span>
           </button>
@@ -224,7 +267,7 @@ function Presence({ name, side, state }: { name: "Sharee" | "Nexa"; side: "left"
 
 function Panel({ icon, title, meta, children }: { icon: IconName; title: string; meta?: ReactNode; children: ReactNode }) {
   return (
-    <article className="panel">
+    <article className="panel" data-spot>
       <header><Icon name={icon} /><h3>{title}</h3>{meta && <span className="meta">{meta}</span>}</header>
       {children}
     </article>
@@ -334,7 +377,7 @@ function Dock() {
       </div>
       <div className="quick">
         {([["folder", "Open File"], ["search", "Search"], ["spark", "Create"], ["play", "Automate"]] as [IconName, string][]).map(([i, l]) => (
-          <button key={l} className="quick-btn" disabled title="Arrives with its milestone"><Icon name={i} size={20} />{l}</button>
+          <button key={l} className="quick-btn" data-spot disabled title="Arrives with its milestone"><Icon name={i} size={20} />{l}</button>
         ))}
       </div>
       {note && <p className="dock-note" role="status">{note}</p>}

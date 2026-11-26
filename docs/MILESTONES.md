@@ -18,7 +18,7 @@ Status: ✅ done · 🔶 in progress · ⛔ blocked · ⬜ pending
 | M07 | Native desktop shell and navigation | 🔶 shell + dashboard; other sections next |
 | M08 | Dual and individual presence | ⬜ |
 | M09 | Adaptive Visual Hub | ⬜ |
-| M10 | Collective Intelligence neural core | 🔶 rendering done; real event wiring with M16 |
+| M10 | Collective Intelligence neural core | 🔶 v2 motion + interaction done; real event wiring with M16 |
 | M11 | Cognitive Memory and Evolution Studios | ⬜ |
 | M12 | Awareness, Activity, Computer Control interfaces | ⬜ |
 | M13 | Voice and Personality Studios | ⬜ |

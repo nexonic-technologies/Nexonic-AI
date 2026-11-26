@@ -97,3 +97,23 @@ by a timer.
 
 User Interaction → Perception → Reasoning → Collaboration → Action → Learning →
 Personalized Outcome.
+
+## Motion
+
+Reference: the owner's motion clip (torus of flowing filaments with a sweeping rim band), adapted
+into an original two-band design. Rules:
+
+- **Core:** tumbling torus of streamlines; energy pulses travel along filaments; a cyan (Sharee)
+  and an amber (Nexa) band orbit in opposite phase and raise rim spikes; the torus leans toward
+  the cursor; hovering a node steers the bands to its sector. `activity` from real events speeds
+  flow and widens the bands. Budgets per motion level (Off / Minimal / Balanced / Cinematic).
+- **Entrance:** header → navigation → core scales in → portraits slide in → nodes → mode bar →
+  panels → dock (≈1 s total).
+- **Cursor:** portrait and aura parallax, core-label drift, light that follows the cursor on panels,
+  navigation and quick actions.
+- **Feedback:** sliding mode indicator (spring), connector glow on node hover, dock focus glow and
+  mic halo.
+- **Accessibility:** `prefers-reduced-motion` disables all CSS motion and drops the core to a slow
+  Minimal budget. Rendering pauses when the window is hidden.
+- **Themes:** the presence stage stays dark in both themes (portraits and core are lit for dark);
+  in light theme it is framed as a rounded card.

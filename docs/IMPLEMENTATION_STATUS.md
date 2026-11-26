@@ -13,7 +13,8 @@ Classification: **Implemented** · **Tested** · **Experimental** · **Blocked**
 | Design system tokens and dashboard spec | Implemented | `docs/DESIGN_SYSTEM.md`, `packages/design-system` |
 | macOS app shell (Tauri 2 + React) | Implemented | `apps/desktop`; `Desktop` workflow builds the arm64 .app/.dmg |
 | Main dashboard layout (matches owner reference) | Implemented | header, sidebar, presence, core, modes, 4 panels, dock |
-| Collective Intelligence core (WebGL particles + filaments, cursor-reactive, reduced-motion) | Implemented | `NeuralCore.tsx`; idle drift is decorative and labelled |
+| Collective Intelligence core v2 (woven torus of streamlines, flowing energy pulses, orbiting Sharee/Nexa bands with rim spikes, cursor lean, node-hover steering, motion budgets, background suspension) | Implemented | `NeuralCore.tsx`; idle drift is decorative and labelled |
+| Interface motion (staged entrance, portrait parallax, cursor panel light, sliding mode ink, node connector glow, dock halo; reduced-motion = off) | Implemented | `styles/app.css` motion section |
 | Live system detection (chip, memory, OS) | Tested | `system_info` command + Rust test |
 | Permissions UI wired to Rust (toggle, emergency stop, resume) | Implemented | Awareness panel |
 | Today's Focus (local task list) | Implemented | stored locally; moves to encrypted SQLite with M20 |
