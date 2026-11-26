@@ -19,3 +19,10 @@ Optional premium mode (later): a cloud live avatar (e.g. HeyGen LiveAvatar), off
 
 Next: a persistent sidecar that streams frames to the app in real time (idle, listening,
 thinking, speaking states), bundled with its own runtime so users install nothing.
+
+## Probe results (26 Nov 2026, GitHub Apple M1 virtual runner)
+
+- Render: ~3–7 minutes per 7-second clip on the slow virtual M1 (no Neural Engine, shared GPU); expect far faster on an M5.
+- Identity, head motion, blinks and expressions: natural, no paste-back seams.
+- **Lip sync: too weak** — JoyVASA mostly drives head/expression; mouth opening is minimal. Next step: add MuseTalk 1.5 MLX on the mouth region (driven by the same audio) for real visemes.
+- Pinned snapshots: FasterLivePortrait-MLX-weights `2cc2ac9…`, Kokoro-82M-bf16 `a71e4d3…`.

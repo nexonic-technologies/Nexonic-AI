@@ -18,6 +18,9 @@ concurrency:
 env:
   FLP_REPO: https://github.com/ivanfioravanti/fasterliveportrait-mlx
   FLP_COMMIT: d5361f4806c14fe2051eecb1dd5a89930f46db0d
+  # pinned model snapshots (verified 26 Nov 2026)
+  FLIP_MLX_WEIGHTS_REVISION: 2cc2ac92c9fe65ca4fb68cb1a1556ead285e7391
+  KOKORO_REVISION: a71e4d38b236d968966a2002c4c895dbd12b1c3c
   # plain HTTP downloads with timeouts (the xet transfer stalled for an hour once)
   HF_HUB_DISABLE_XET: "1"
   HF_HUB_DOWNLOAD_TIMEOUT: "60"
@@ -53,10 +56,10 @@ jobs:
         run: |
           cd flp
           for i in 1 2 3; do
-            uv run python scripts/download_mlx_weights.py --repo-id ivanfioravanti/FasterLivePortrait-MLX-weights && break
+            uv run python scripts/download_mlx_weights.py --repo-id ivanfioravanti/FasterLivePortrait-MLX-weights --revision "$FLIP_MLX_WEIGHTS_REVISION" && break
             echo "download attempt $i failed; retrying"; sleep 10
           done
-          uv run python -c "from huggingface_hub import snapshot_download as s; print(s('mlx-community/Kokoro-82M-bf16'))"
+          uv run python -c "from huggingface_hub import snapshot_download as s; import os; print(s('mlx-community/Kokoro-82M-bf16', revision=os.environ['KOKORO_REVISION']))"
           du -sh ~/.cache/huggingface
       - name: Render
         timeout-minutes: 30
