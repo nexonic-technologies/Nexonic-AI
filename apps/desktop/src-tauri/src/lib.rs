@@ -39,20 +39,25 @@ pub struct SystemInfo {
 }
 
 pub fn detect_system() -> SystemInfo {
-    let mut sys = sysinfo::System::new();
-    sys.refresh_cpu_all();
-    sys.refresh_memory();
-    let chip = sys
-        .cpus()
-        .first()
-        .map(|c| c.brand().trim().to_string())
-        .filter(|b| !b.is_empty())
-        .unwrap_or_else(|| "Unknown processor".into());
+    let (chip, cpu_cores, memory_bytes) = match sysinfo::System::new() {
+        Ok(mut sys) => {
+            sys.refresh_cpu_all();
+            sys.refresh_memory();
+            let chip = sys
+                .cpus()
+                .first()
+                .map(|c| c.brand().trim().to_string())
+                .filter(|b| !b.is_empty())
+                .unwrap_or_else(|| "Unknown processor".into());
+            (chip, sys.cpus().len(), sys.total_memory())
+        }
+        Err(_) => ("Unknown processor".into(), 0, 0),
+    };
     SystemInfo {
         chip,
-        cpu_cores: sys.cpus().len(),
-        memory_bytes: sys.total_memory(),
-        os_name: sysinfo::System::name().unwrap_or_else(|| "Unknown OS".into()),
+        cpu_cores,
+        memory_bytes,
+        os_name: sysinfo::System::name().unwrap_or_else(|_| "Unknown OS".into()),
         os_version: sysinfo::System::os_version().unwrap_or_default(),
         arch: std::env::consts::ARCH.into(),
         app_version: env!("CARGO_PKG_VERSION").into(),
