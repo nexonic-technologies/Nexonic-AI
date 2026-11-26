@@ -15,6 +15,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+pub mod persist;
+
 /// The two independent personalities. Names are user-customizable in the app;
 /// these identifiers are stable internal ids.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -47,7 +49,7 @@ pub enum Kind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MemoryId(u64);
+pub struct MemoryId(pub u64);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Memory {
@@ -61,6 +63,8 @@ pub struct Memory {
     pub confidence: f32,
     /// Agents this record must never reach, whatever the domain.
     pub never_share_with: BTreeSet<AgentId>,
+    /// Unix seconds.
+    pub created_at: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +76,8 @@ pub enum MemoryError {
     /// Confidential records can't move into collective memory.
     ConfidentialityConflict,
     InvalidConfidence,
+    /// Storage or encryption failure (persistent store only).
+    Storage(String),
 }
 
 impl fmt::Display for MemoryError {
@@ -119,6 +125,13 @@ fn can_read(reader: Reader, m: &Memory) -> bool {
     }
 }
 
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 fn words(text: &str) -> impl Iterator<Item = String> + '_ {
     text.split(|c: char| !c.is_alphanumeric())
         .filter(|w| w.len() > 1)
@@ -152,9 +165,31 @@ impl MemoryStore {
                 source: new.source,
                 confidence: new.confidence,
                 never_share_with: new.never_share_with,
+                created_at: now_secs(),
             },
         );
         Ok(id)
+    }
+
+    /// Re-inserts a record loaded from storage, keeping its id.
+    pub fn restore(&mut self, m: Memory) {
+        self.next = self.next.max(m.id.0);
+        for w in words(&m.text) {
+            self.index.entry(w).or_default().insert(m.id);
+        }
+        self.records.insert(m.id, m);
+    }
+
+    /// Records `reader` may see, newest first.
+    pub fn recent(&self, reader: Reader, limit: usize) -> Vec<&Memory> {
+        let mut v: Vec<&Memory> = self
+            .records
+            .values()
+            .filter(|m| can_read(reader, m))
+            .collect();
+        v.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.id.cmp(&a.id)));
+        v.truncate(limit);
+        v
     }
 
     pub fn get(&self, reader: Reader, id: MemoryId) -> Result<&Memory, MemoryError> {
