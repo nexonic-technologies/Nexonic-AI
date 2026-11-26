@@ -1,0 +1,76 @@
+{
+  "version": "1.0",
+  "targets": {
+    "facialFps": 60,
+    "lipSyncMaxLatencyMs": 100,
+    "realtimeFormat": "mlx-frames",
+    "future3dFormat": "glb"
+  },
+  "visemes": [
+    "Rest",
+    "Ah",
+    "Eh",
+    "Ee",
+    "Oh",
+    "Oo",
+    "FV",
+    "Th",
+    "SZ",
+    "ShCh",
+    "PB",
+    "TD",
+    "KG",
+    "L",
+    "R"
+  ],
+  "personas": {
+    "sharee": {
+      "name": "Sharee",
+      "role": "Analytical, Technical & Creative Partner",
+      "accentHex": "#00dec6",
+      "voice": {
+        "kokoroId": "am_michael",
+        "languages": ["en", "ur", "hi"],
+        "style": "Natural, Calm, Confident"
+      },
+      "sourcePortrait": "sources/sharee.png",
+      "expressions": {
+        "neutral": { "cfgScale": 1.2, "drivingMultiplier": 1.0, "facs": [] },
+        "idle": { "cfgScale": 1.0, "drivingMultiplier": 0.75, "facs": ["AU45"] },
+        "listening": { "cfgScale": 1.2, "drivingMultiplier": 0.9, "facs": ["AU1", "AU2", "AU5"] },
+        "thinking": { "cfgScale": 1.3, "drivingMultiplier": 0.95, "facs": ["AU4", "AU7", "AU17"] },
+        "speaking": { "cfgScale": 1.6, "drivingMultiplier": 1.1, "facs": ["AU12", "AU25", "AU26"] },
+        "collaborating": { "cfgScale": 1.5, "drivingMultiplier": 1.05, "facs": ["AU6", "AU12", "AU25"] },
+        "happy": { "cfgScale": 1.5, "drivingMultiplier": 1.1, "facs": ["AU6", "AU12"] },
+        "curious": { "cfgScale": 1.4, "drivingMultiplier": 1.0, "facs": ["AU1", "AU2", "AU25"] },
+        "confident": { "cfgScale": 1.3, "drivingMultiplier": 1.0, "facs": ["AU12", "AU17"] },
+        "concerned": { "cfgScale": 1.3, "drivingMultiplier": 0.95, "facs": ["AU1", "AU4", "AU15"] },
+        "determined": { "cfgScale": 1.4, "drivingMultiplier": 1.0, "facs": ["AU4", "AU7", "AU23"] }
+      }
+    },
+    "nexa": {
+      "name": "Nexa",
+      "role": "Creative, Analytical & Collaborative Co-Intelligence",
+      "accentHex": "#ffb568",
+      "voice": {
+        "kokoroId": "af_heart",
+        "languages": ["en", "ur", "hi"],
+        "style": "Warm, Natural, Expressive"
+      },
+      "sourcePortrait": "sources/nexa.png",
+      "expressions": {
+        "neutral": { "cfgScale": 1.2, "drivingMultiplier": 1.0, "facs": [] },
+        "idle": { "cfgScale": 1.0, "drivingMultiplier": 0.75, "facs": ["AU45"] },
+        "listening": { "cfgScale": 1.3, "drivingMultiplier": 0.95, "facs": ["AU1", "AU2", "AU12"] },
+        "thinking": { "cfgScale": 1.4, "drivingMultiplier": 0.95, "facs": ["AU4", "AU7", "AU14"] },
+        "speaking": { "cfgScale": 1.7, "drivingMultiplier": 1.15, "facs": ["AU6", "AU12", "AU25", "AU26"] },
+        "collaborating": { "cfgScale": 1.6, "drivingMultiplier": 1.1, "facs": ["AU6", "AU12", "AU25"] },
+        "happy": { "cfgScale": 1.6, "drivingMultiplier": 1.15, "facs": ["AU6", "AU12"] },
+        "curious": { "cfgScale": 1.5, "drivingMultiplier": 1.05, "facs": ["AU1", "AU2", "AU5", "AU25"] },
+        "confident": { "cfgScale": 1.4, "drivingMultiplier": 1.05, "facs": ["AU6", "AU12", "AU17"] },
+        "concerned": { "cfgScale": 1.3, "drivingMultiplier": 0.95, "facs": ["AU1", "AU4", "AU15"] },
+        "determined": { "cfgScale": 1.4, "drivingMultiplier": 1.05, "facs": ["AU4", "AU7", "AU17"] }
+      }
+    }
+  }
+}

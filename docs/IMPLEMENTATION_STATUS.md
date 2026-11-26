@@ -9,7 +9,7 @@ Classification: **Implemented** · **Tested** · **Experimental** · **Blocked**
 | Private-file blocking | Tested | `.gitignore`, pre-commit hook, `Guard` job |
 | Permission model with emergency stop | Tested | `crates/permissions`, `cargo test` in `Rust` workflow |
 | Three-domain memory isolation (storage layer) | Tested | `crates/memory-engine`, `cargo test` |
-| Encrypted persistence, retrieval, consolidation | Pending | M20/M23 |
+| Encrypted persistence (SQLite + XChaCha20-Poly1305) | Tested | `crates/memory-engine/src/persist.rs`, 6 tests (wiring to `AppState` + Keychain + consolidation pending in M20/M23) |
 | Design system tokens and dashboard spec | Implemented | `docs/DESIGN_SYSTEM.md`, `packages/design-system` |
 | macOS app shell (Tauri 2 + React) | Implemented | `apps/desktop`; `Desktop` workflow builds the arm64 .app/.dmg |
 | Main dashboard layout (matches owner reference) | Implemented | header, sidebar, presence, core, modes, 4 panels, dock |
@@ -20,7 +20,7 @@ Classification: **Implemented** · **Tested** · **Experimental** · **Blocked**
 | Today's Focus (local task list) | Implemented | stored locally; moves to encrypted SQLite with M20 |
 | Encrypted persistent memory (SQLite + XChaCha20-Poly1305, Keychain key) | Tested | `crates/memory-engine/src/persist.rs`, 6 tests |
 | Typography system + motion typography | Implemented | Sora / Geist / Geist Mono, `MotionText.tsx` |
-| Talking Sharee/Nexa (on-device: Kokoro → JoyVASA → LivePortrait MLX) | Experimental | `services/presence`, `Presence probe` workflow |
+| Talking Sharee/Nexa (on-device: Kokoro → JoyVASA → LivePortrait MLX → MuseTalk 1.5 MLX) | Experimental | `services/presence`, `Presence probe` workflow; persona/expression specs in `personas.json` |
 | Agents, collaboration feed, memory events, voice | Pending | panels show honest empty states until M16/M17/M28 |
 | Character art | Interim | owner concept art; real-time digital humans in M15 |
 | Agents, model routing, voice, awareness, automation | Pending | Phases C–E |

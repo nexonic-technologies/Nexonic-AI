@@ -9,4 +9,4 @@
 | Hardware not yet measured | Status | No performance or memory figures are claimed | Benchmarks on the owner's MacBook Pro M5 |
 | Developer ID signing / notarization | Blocker (later) | Only unsigned/ad-hoc builds possible | Apple Developer credentials as repository secrets |
 | Final photorealistic character assets | Blocker (later) | Digital-human renderer will be tested with licensed development assets | Commissioned or licensed character assets |
-| Memory engine is in-memory only | Status | Isolation rules are enforced and tested; encrypted SQLite persistence comes next (M20) | Implementation |
+| Memory engine not yet wired into Tauri app | Status | Isolation + encrypted SQLite (`persist.rs`) are tested in `crates/memory-engine`, while `apps/desktop/src-tauri` still holds `MemoryStore::new()` in RAM | Wire `PersistentMemory` + Keychain key into `AppState` (M20) |
