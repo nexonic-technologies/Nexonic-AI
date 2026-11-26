@@ -18,12 +18,18 @@ concurrency:
 env:
   FLP_REPO: https://github.com/ivanfioravanti/fasterliveportrait-mlx
   FLP_COMMIT: d5361f4806c14fe2051eecb1dd5a89930f46db0d
+  # plain HTTP downloads with timeouts (the xet transfer stalled for an hour once)
+  HF_HUB_DISABLE_XET: "1"
+  HF_HUB_DOWNLOAD_TIMEOUT: "60"
+  HF_HUB_ETAG_TIMEOUT: "30"
+  HF_HUB_DISABLE_TELEMETRY: "1"
+  HF_HUB_DISABLE_PROGRESS_BARS: "1"
 
 jobs:
   render:
     name: Talking clips (Apple Silicon, on-device)
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tools
@@ -38,9 +44,22 @@ jobs:
           test "$(git rev-parse HEAD)" = "$FLP_COMMIT"
           uv sync
           uv run python -c "import mlx.core as mx; print('mlx', mx.__version__, mx.default_device())"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/huggingface
+          key: hf-presence-${{ env.FLP_COMMIT }}-v1
+      - name: Download models (time-boxed)
+        timeout-minutes: 20
+        run: |
+          cd flp
+          for i in 1 2 3; do
+            uv run python scripts/download_mlx_weights.py --repo-id ivanfioravanti/FasterLivePortrait-MLX-weights && break
+            echo "download attempt $i failed; retrying"; sleep 10
+          done
+          uv run python -c "from huggingface_hub import snapshot_download as s; print(s('mlx-community/Kokoro-82M-bf16'))"
+          du -sh ~/.cache/huggingface
       - name: Render
-        env:
-          HF_HUB_DISABLE_TELEMETRY: "1"
+        timeout-minutes: 30
         run: |
           cd flp
           uv run python "$GITHUB_WORKSPACE/services/presence/render_demo.py" --flp . --out "$RUNNER_TEMP/presence"
