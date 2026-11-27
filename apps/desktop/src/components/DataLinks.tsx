@@ -35,6 +35,11 @@ function hexRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+function smooth(a: number, b: number, x: number) {
+  const t = Math.min(Math.max((x - a) / (b - a), 0), 1);
+  return t * t * (3 - 2 * t);
+}
+
 function at(line: Line, t: number) {
   const f = Math.min(Math.max(t, 0), 1) * (line.pts.length - 1);
   const i = Math.floor(f);
@@ -96,6 +101,14 @@ export function DataLinks({
           const q = p.getPointAtLength((total * i) / (SAMPLES - 1));
           return { x: q.x * sx, y: q.y * sy };
         });
+        // carry the fibre on into the ring so it dissolves inside the core, not at its edge
+        const hub = pts[pts.length - 1]!;
+        const cx = w / 2;
+        const cy = h / 2;
+        for (let i = 1; i <= 14; i++) {
+          const k = (i / 14) * 0.42;
+          pts.push({ x: hub.x + (cx - hub.x) * k, y: hub.y + (cy - hub.y) * k });
+        }
         let len = 0;
         for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y);
         const prev = lines.current.get(id);
@@ -179,16 +192,27 @@ export function DataLinks({
         const e = line.energy;
         const [r, g, b] = line.color;
 
-        // glowing tube underlay that brightens with energy
+        // A fine fibre, brightest at the node and fading to nothing where it
+        // enters the ring: one continuous stroke with a gradient along it.
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
+        const p0 = line.pts[0]!;
+        const p1 = line.pts[line.pts.length - 1]!;
+        const fibre = (alpha: number) => {
+          const gr = ctx.createLinearGradient(p0.x, p0.y, p1.x, p1.y);
+          gr.addColorStop(0, `rgba(${r},${g},${b},${alpha})`);
+          gr.addColorStop(0.45, `rgba(${r},${g},${b},${alpha * 0.9})`);
+          gr.addColorStop(0.8, `rgba(${r},${g},${b},${alpha * 0.25})`);
+          gr.addColorStop(1, `rgba(${r},${g},${b},0)`);
+          return gr;
+        };
         ctx.beginPath();
         line.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-        ctx.strokeStyle = `rgba(${r},${g},${b},${0.13 + e * 0.15})`;
-        ctx.lineWidth = 9 + e * 5;
+        ctx.strokeStyle = fibre(0.08 + e * 0.12);
+        ctx.lineWidth = 5 + e * 4;
         ctx.stroke();
-        ctx.strokeStyle = `rgba(${r},${g},${b},${0.48 + e * 0.35})`;
-        ctx.lineWidth = 2.6 + e * 1.2;
+        ctx.strokeStyle = fibre(0.34 + e * 0.36);
+        ctx.lineWidth = 1.2 + e * 0.8;
         ctx.stroke();
 
         if (red) continue;
@@ -207,13 +231,14 @@ export function DataLinks({
           const head = at(line, p.t);
           const tailT = p.t - p.dir * (0.05 + e * 0.04);
           const tail = at(line, tailT);
-          const fade = Math.min(1, Math.min(p.t, 1 - p.t) * 8); // fade at both ends
+          // fade in at the node, melt away as it enters the core
+          const fade = Math.min(1, p.t * 8) * (1 - smooth(0.55, 1.0, p.t));
           const inbound = p.dir === 1;
           const cr = inbound ? r : Math.round(r + (255 - r) * 0.6);
           const cg = inbound ? g : Math.round(g + (255 - g) * 0.6);
           const cb = inbound ? b : Math.round(b + (255 - b) * 0.6);
           const alpha = (0.55 + e * 0.45) * fade;
-          const size = (1.6 + e * 1.4) * p.size;
+          const size = (1.1 + e * 1.1) * p.size;
           const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
           grad.addColorStop(0, `rgba(${cr},${cg},${cb},0)`);
           grad.addColorStop(1, `rgba(${cr},${cg},${cb},${alpha})`);
@@ -234,21 +259,12 @@ export function DataLinks({
         }
         line.pulses = keep;
 
-        // ports: pulsing rings at both ends
-        const ends = [line.pts[0]!, line.pts[line.pts.length - 1]!];
-        ends.forEach((pt, i) => {
-          const ph = (now / 1000) * (1.2 + e * 2) + i * 0.5;
-          const ring = (ph % 1) * (8 + e * 6);
-          ctx.strokeStyle = `rgba(${r},${g},${b},${(1 - (ph % 1)) * (0.35 + e * 0.5)})`;
-          ctx.lineWidth = 1.2;
-          ctx.beginPath();
-          ctx.arc(pt.x, pt.y, 3 + ring, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.fillStyle = `rgba(${r},${g},${b},${0.7 + e * 0.3})`;
-          ctx.beginPath();
-          ctx.arc(pt.x, pt.y, 3 + e * 1.2, 0, Math.PI * 2);
-          ctx.fill();
-        });
+        // a small socket at the node end only; the core end has none
+        const pin = line.pts[0]!;
+        ctx.fillStyle = `rgba(${r},${g},${b},${0.45 + e * 0.4})`;
+        ctx.beginPath();
+        ctx.arc(pin.x, pin.y, 1.8 + e * 0.8, 0, Math.PI * 2);
+        ctx.fill();
       }
       ctx.globalCompositeOperation = "source-over";
     };
