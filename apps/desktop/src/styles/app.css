@@ -617,3 +617,12 @@ html[data-theme="light"] .stage .modes { margin-bottom: var(--sp-2); }
 .node:active { cursor: grabbing; }
 .node.moved { transform: translate(-50%, -50%); }
 .node.moved:hover, .node.moved[aria-pressed="true"] { transform: translate(-50%, -50%) scale(1.04); }
+
+/* Natural avatars: no glow, halo, ring or rim light behind Sharee and Nexa.
+   They sit in the room's own light; the canvas fade blends them into the stage. */
+.presence .aura,
+.presence .holo-spot,
+.presence .holo-ring,
+.presence .holo-scan { display: none; }
+.portrait.live,
+.presence.is-active .portrait.live { filter: none; }

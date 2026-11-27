@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import subprocess
 import sys
@@ -40,6 +41,8 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=720)
     ap.add_argument("--keep", type=float, default=0.8, help="fraction of the height kept from the top (drops the lower torso)")
     ap.add_argument("--crf", type=int, default=19)
+    ap.add_argument("--start", type=float, default=0.0, help="seconds to skip at the start (e.g. a head turn into the pose)")
+    ap.add_argument("--pingpong", action="store_true", help="append the clip reversed so it loops without a jump")
     args = ap.parse_args()
 
     import onnxruntime as ort
@@ -50,7 +53,7 @@ def main() -> int:
     h = int(h_full * args.keep) // 2 * 2
 
     dec = subprocess.Popen(
-        ["ffmpeg", "-v", "error", "-i", args.src, "-vf", f"scale={w}:{h_full}:flags=lanczos,crop={w}:{h}:0:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        ["ffmpeg", "-v", "error", "-ss", f"{args.start}", "-i", args.src, "-vf", f"scale={w}:{h_full}:flags=lanczos,crop={w}:{h}:0:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
         stdout=subprocess.PIPE,
     )
     enc = subprocess.Popen(
@@ -80,6 +83,17 @@ def main() -> int:
     enc.stdin.close()
     enc.wait()
     dec.wait()
+    if args.pingpong and n:
+        # forward then backward: the last frame flows back into the first, so the loop has no seam
+        tmp = args.dst + ".fwd.mp4"
+        os.replace(args.dst, tmp)
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-i", tmp, "-filter_complex", "[0:v]split[a][b];[b]reverse,trim=start_frame=1[r];[a][r]concat=n=2:v=1[v]",
+             "-map", "[v]", "-c:v", "libx264", "-preset", "slow", "-crf", str(args.crf), "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", args.dst],
+            check=True,
+        )
+        os.remove(tmp)
+        n = 2 * n - 1
     print(json.dumps({"frames": n, "width": w, "height": h, "fps": fps, "out": args.dst}))
     return 0 if n else 1
 

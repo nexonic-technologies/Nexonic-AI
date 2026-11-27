@@ -24,15 +24,27 @@ const FACE_Y = 0.36;
 const FACE_W = 0.4;
 
 // box = x, y, w, h of the picture in canvas units (0–1, origin top-left)
-const VERT = `attribute vec2 p; varying vec2 uv; uniform vec4 box;
-void main(){ uv = p; vec2 q = box.xy + p * box.zw; gl_Position = vec4(q.x * 2.0 - 1.0, 1.0 - q.y * 2.0, 0.0, 1.0); }`;
-const FRAG = `precision mediump float; varying vec2 uv; uniform sampler2D tex; uniform float alpha;
+const VERT = `attribute vec2 p; varying vec2 uv; varying vec2 sp; uniform vec4 box;
+void main(){ uv = p; vec2 q = box.xy + p * box.zw; sp = q; gl_Position = vec4(q.x * 2.0 - 1.0, 1.0 - q.y * 2.0, 0.0, 1.0); }`;
+// sp = position on the canvas (0–1, origin top-left). The fade is measured on the
+// canvas, not on the video frame, so the body always melts into the stage, however
+// the clip is scaled to line the faces up: no straight cut at the bottom or sides.
+const FRAG = `precision mediump float; varying vec2 uv; varying vec2 sp; uniform sampler2D tex; uniform float alpha;
 void main(){
   vec3 c = texture2D(tex, vec2(uv.x * 0.5, uv.y)).rgb;
   float a = texture2D(tex, vec2(0.5 + uv.x * 0.5, uv.y)).r;
-  // dissolve the frame edges and the lower torso into the stage
-  float edge = smoothstep(0.0, 0.1, uv.x) * smoothstep(1.0, 0.9, uv.x) * smoothstep(1.0, 0.8, uv.y);
-  a *= edge * alpha;
+  // never show the clip's own frame edges
+  float frame = smoothstep(0.0, 0.05, uv.x) * smoothstep(1.0, 0.95, uv.x) * smoothstep(1.0, 0.93, uv.y);
+  // soft oval around head and shoulders, long fade down the chest
+  vec2 d = (sp - vec2(0.5, 0.4)) / vec2(0.56, 0.66);
+  float oval = 1.0 - smoothstep(0.72, 1.0, length(d));
+  float low = smoothstep(1.0, 0.58, sp.y);
+  low = low * low * (3.0 - 2.0 * low);
+  float sides = smoothstep(0.0, 0.14, sp.x) * smoothstep(1.0, 0.86, sp.x);
+  float fade = oval * low * sides;
+  // light falls off where the body fades, like a figure lit in a dark room
+  c *= mix(0.55, 1.0, smoothstep(0.0, 0.8, fade));
+  a *= frame * fade * alpha;
   gl_FragColor = vec4(c * a, a);
 }`;
 
