@@ -560,8 +560,8 @@ function Presence({
   const moodLabel = video
     ? clip === "chat"
       ? "Chatting"
-      : mood === "attentive" || mood === "thinking"
-        ? MOOD_LABEL[mood]
+      : state === "thinking" || state === "speaking" || state === "listening"
+        ? presenceLabel[state]
         : "Present"
     : MOOD_LABEL[mood];
 
