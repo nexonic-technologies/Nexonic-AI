@@ -4,6 +4,7 @@
 //! permission set and the encrypted SQLite memory store. Nothing is hardcoded or
 //! simulated.
 
+mod brain;
 mod keychain;
 
 use std::collections::BTreeSet;
@@ -484,6 +485,7 @@ pub fn run() {
                 .map_err(|e| format!("failed to locate app data directory: {e}"))?;
             std::fs::create_dir_all(&dir)?;
             app.manage(AppState::open_or_fallback(&dir.join("memory.sqlite")));
+            app.manage(brain::BrainState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -498,7 +500,14 @@ pub fn run() {
             forget_memory,
             kv_get,
             kv_set,
-            check_updates
+            check_updates,
+            brain::brain_status,
+            brain::brain_set_active,
+            brain::brain_set_model,
+            brain::brain_save_key,
+            brain::brain_clear_key,
+            brain::brain_stop,
+            brain::agent_reply
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nexonic AI");

@@ -1,7 +1,7 @@
 /** Typed bridge to the Rust core. Outside the desktop runtime (plain browser
  *  preview) calls resolve to `null` so the UI can say so instead of faking data. */
 
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 export interface SystemInfo {
   chip: string;
@@ -62,6 +62,42 @@ export type Capability =
   | "CloudContextSharing"
   | "RawRecordingRetention";
 
+export interface LocalBrain {
+  name: string;
+  licence: string;
+  sizeBytes: number;
+  installed: boolean;
+  supported: boolean;
+  loaded: boolean;
+  contextTokens: number | null;
+}
+
+export interface ProviderView {
+  id: string;
+  name: string;
+  free: boolean;
+  note: string;
+  keyUrl: string;
+  defaultModel: string;
+  model: string;
+  hasKey: boolean;
+}
+
+export interface BrainStatus {
+  /** "local" or a provider id. */
+  active: string;
+  ready: boolean;
+  local: LocalBrain;
+  providers: ProviderView[];
+}
+
+export type ChatRole = "user" | "assistant";
+export interface ChatTurn {
+  role: ChatRole;
+  content: string;
+}
+export type ReplyEvent = { kind: "start"; brain: string } | { kind: "token"; text: string };
+
 export const inDesktop = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -89,6 +125,18 @@ export const ipc = {
   kvGet: (key: string) => call<string | null>("kv_get", { key }),
   kvSet: (key: string, value: string) => call<void>("kv_set", { key, value }),
   checkUpdates: () => call<UpdateStatus>("check_updates"),
+  brainStatus: () => call<BrainStatus>("brain_status"),
+  brainSetActive: (id: string) => call<BrainStatus>("brain_set_active", { id }),
+  brainSetModel: (id: string, model: string) => call<BrainStatus>("brain_set_model", { id, model }),
+  brainSaveKey: (id: string, key: string) => call<BrainStatus>("brain_save_key", { id, key }),
+  brainClearKey: (id: string) => call<BrainStatus>("brain_clear_key", { id }),
+  brainStop: () => call<void>("brain_stop"),
+  /** Streams one reply from Sharee or Nexa; resolves with the full text. */
+  agentReply: (agent: "Sharee" | "Nexa", history: ChatTurn[], onEvent: (e: ReplyEvent) => void) => {
+    const channel = new Channel<ReplyEvent>();
+    channel.onmessage = onEvent;
+    return call<string>("agent_reply", { agent, history, onEvent: channel });
+  },
 };
 
 export const capabilityLabel: Record<Capability, string> = {

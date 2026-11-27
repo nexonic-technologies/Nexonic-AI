@@ -24,11 +24,14 @@ Classification: **Implemented** · **Tested** · **Experimental** · **Blocked**
 | Interactive core (magnetic cursor field, needles, click shockwave, drag-to-spin with momentum) | Implemented | `NeuralCore.tsx`; cursor play is never reported as agent activity |
 | Talking Sharee/Nexa (on-device: Kokoro → JoyVASA → LivePortrait MLX → MuseTalk 1.5 MLX) | Experimental | `services/presence`, `Presence probe` workflow; persona/expression specs in `personas.json` |
 | Audit fixes (26 Nov) | Tested | owner-policy handles rewritten branches; graceful encrypted-storage fallback; update check async, semver, opt-in; waveform moves only for real audio; Today's Focus save race fixed; 1280×800 Awareness panel fit |
-| Agents, collaboration feed, memory events, voice | Pending | panels show honest empty states until M16/M17/M28 |
+| On-device brain: Qwen3.5 2B (Apache-2.0, Q4_K_M 1.28 GB) shipped inside the app, run by llama.cpp with Metal; offline, nothing leaves the Mac | Implemented | `crates/model-router` (`local` feature); model pinned by SHA-256, downloaded and verified on the macOS build runner, real-inference test in CI; context sized to the Mac's memory |
+| Cloud brains: OpenRouter (free key, `openrouter/free`), OpenAI, Anthropic, DeepSeek with the customer's own key (macOS Keychain), editable model ids | Implemented | `crates/model-router/src/cloud.rs`, `brain.rs`, Intelligence panel |
+| Conversation: Sharee and Nexa answer in turn (or only the one named), streamed; Nexa sees Sharee's reply; real states (thinking, speaking, listening) drive presence and the core | Implemented | `lib/conversation.ts`, Conversation panel; conversation is not saved to memory yet (M16) |
+| Agent memory, voice | Pending | M16/M28 |
 | Character art | Interim | owner concept art; real-time digital humans in M15 |
 | Agents, model routing, voice, awareness, automation | Pending | Phases C–E |
 | Packaging and releases | Pending | M47/M48 |
 
 ## Next actionable task
 
-Build `crates/model-router` (M17: OpenRouter catalogue, free-only default, cooldown fallback, Keychain key) and wire Sharee and Nexa agent runtimes (M16) to `memory-engine`, alongside the M15 real-time Presence sidecar.
+Wire Sharee and Nexa agent runtimes (M16) to `memory-engine` (remember conversations with consent), then voice and lip sync on the video faces (M15/M28). Model router follow-ups: automatic fallback between brains, optional larger on-device models for 16 GB+ Macs.

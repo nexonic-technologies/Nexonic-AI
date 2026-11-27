@@ -64,3 +64,9 @@ Nexonic AI is licensed under the [GNU Affero General Public License v3.0](LICENS
 Commercial licences, signed builds and premium character and voice packs are available from
 [Nexonic Technologies](https://nexonictechnologies.com/). Character artwork in
 `apps/desktop/src/assets/characters/` is © Nexonic Technologies and is not covered by the AGPL.
+
+### Bundled model
+
+Release builds include [Qwen3.5 2B](https://huggingface.co/Qwen/Qwen3.5-2B) (Apache-2.0, © Alibaba Cloud Qwen team)
+as a Q4_K_M GGUF file, run with [llama.cpp](https://github.com/ggml-org/llama.cpp) (MIT). The file is not stored in
+this repository: the `Desktop` workflow downloads it and verifies its SHA-256 before packaging.

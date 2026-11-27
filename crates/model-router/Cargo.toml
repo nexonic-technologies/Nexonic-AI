@@ -1,0 +1,23 @@
+[package]
+name = "nexonic-model-router"
+description = "On-device model (bundled) and cloud providers (OpenRouter, own keys) for Sharee and Nexa."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Runs the bundled GGUF model through llama.cpp (Metal on Apple Silicon).
+local = ["dep:llama-cpp-2"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+llama-cpp-2 = { version = "0.1.161", default-features = false, optional = true }

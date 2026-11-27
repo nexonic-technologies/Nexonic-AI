@@ -6,7 +6,8 @@ import { LiveFace, type FaceAtlas, type Gaze, type Mood } from "./components/Liv
 import { VideoFace, type ClipName, type ClipSet, type FaceBox } from "./components/VideoFace";
 import { MOOD_LABEL, TEMPERAMENT, usePresenceMood } from "./lib/presenceMood";
 import { CountUp, RollText, ScrambleText, SplitText, useCycle } from "./components/MotionText";
-import { capabilityLabel, formatBytes, inDesktop, ipc, type Capability, type MemorySummary, type MemoryView, type PermissionsView, type SystemInfo, type UpdateStatus } from "./lib/ipc";
+import { capabilityLabel, formatBytes, inDesktop, ipc, type BrainStatus, type Capability, type MemorySummary, type MemoryView, type PermissionsView, type SystemInfo, type UpdateStatus } from "./lib/ipc";
+import { useConversation, type Turn } from "./lib/conversation";
 import { usePersisted, useReducedMotion } from "./lib/store";
 import shareeNeutral from "./assets/characters/sharee.webp";
 import nexaNeutral from "./assets/characters/nexa.webp";
@@ -143,6 +144,9 @@ export function App() {
   const [perms, setPerms] = useState<PermissionsView | null>(null);
   const [memoryInfo, setMemoryInfo] = useState<MemorySummary | null>(null);
   const [memories, setMemories] = useState<MemoryView[]>([]);
+  const [brain, setBrain] = useState<BrainStatus | null>(null);
+  const [intelOpen, setIntelOpen] = useState(false);
+  const convo = useConversation();
 
   const nodes = useMemo(
     () =>
@@ -182,6 +186,7 @@ export function App() {
     void ipc.systemInfo().then(setSys);
     void ipc.permissions().then(setPerms);
     void ipc.memorySummary().then(setMemoryInfo);
+    void ipc.brainStatus().then(setBrain);
     void ipc.memoriesRecent(12).then((items) => {
       if (items) setMemories(items);
     });
@@ -193,18 +198,23 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); }
-      if (e.key === "Escape") { setPalette(false); setNode(null); setAboutOpen(false); }
+      if (e.key === "Escape") { setPalette(false); setNode(null); setAboutOpen(false); setIntelOpen(false); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Agents have no model provider yet (M17), so both are honestly offline.
-  const agentState: PresenceState = "offline";
+  // Real states only: offline until a brain is ready, then driven by actual replies.
+  const stateOf = (who: Agent): PresenceState =>
+    !brain?.ready ? "offline"
+    : convo.speaking === who ? "speaking"
+    : convo.waiting === who ? "thinking"
+    : convo.busy ? "listening"
+    : "idle";
   const activeMode = MODES.find((m) => m.id === mode) ?? MODES[0]!;
   const coreFocus = hoverNode ?? node;
-  // Real agent activity arrives with the agent runtimes (M16); cursor play on the core is not activity.
-  const coreActivity = 0;
+  // The core is active only while a real reply is being produced; cursor play is not activity.
+  const coreActivity = convo.busy ? 1 : 0;
   const presence = usePresenceMood({
     draft,
     sentAt,
@@ -220,7 +230,7 @@ export function App() {
     const t = window.setTimeout(() => setQuiet(true), 6000);
     return () => window.clearTimeout(t);
   }, [draft, sentAt]);
-  const chatting = usePartnerChat(quiet, reduced);
+  const chatting = usePartnerChat(quiet && !convo.busy && convo.turns.length === 0, reduced);
   const clipWant: ClipName = chatting ? "chat" : "idle";
 
   return (
@@ -233,13 +243,13 @@ export function App() {
         theme={theme}
         onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
       />
-      <Sidebar section={section} onSection={(s) => { setSection(s); if (s === "settings") setAboutOpen(true); }} sys={sys} />
+      <Sidebar section={section} onSection={(s) => { setSection(s); if (s === "settings") setAboutOpen(true); if (s === "intelligence") setIntelOpen(true); }} sys={sys} />
       <main className="main">
         <section className="stage" aria-label="Presence" data-theme="dark">
           <Presence
             name="Sharee"
             side="left"
-            state={agentState}
+            state={stateOf("Sharee")}
             mood={presence.Sharee.mood}
             gaze={presence.Sharee.gaze}
             clip={clipWant}
@@ -308,7 +318,7 @@ export function App() {
           <Presence
             name="Nexa"
             side="right"
-            state={agentState}
+            state={stateOf("Nexa")}
             mood={presence.Nexa.mood}
             gaze={presence.Nexa.gaze}
             clip={clipWant}
@@ -328,7 +338,7 @@ export function App() {
           {activeMode.panels.map((p) => (
             <div key={`${mode}-${p}`} className="panel-slot">
               {p === "focus" && <FocusPanel />}
-              {p === "collab" && <CollabPanel />}
+              {p === "collab" && <CollabPanel turns={convo.turns} busy={convo.busy} ready={!!brain?.ready} onStop={convo.stop} onClear={convo.clear} onIntel={() => setIntelOpen(true)} />}
               {p === "memory" && (
                 <MemoryPanel
                   info={memoryInfo}
@@ -345,7 +355,13 @@ export function App() {
             </div>
           ))}
         </section>
-        <Dock onDraft={setDraft} onSend={() => setSentAt(performance.now())} />
+        <Dock
+          onDraft={setDraft}
+          ready={!!brain?.ready}
+          busy={convo.busy}
+          onIntel={() => setIntelOpen(true)}
+          onSend={(text) => { setSentAt(performance.now()); void convo.send(text); }}
+        />
       </main>
       {node && <Inspector node={nodes.find((n) => n.id === node)!} onClose={() => setNode(null)} />}
       {palette && (
@@ -356,6 +372,7 @@ export function App() {
           onAbout={() => { setPalette(false); setAboutOpen(true); }}
         />
       )}
+      {intelOpen && <IntelligenceModal status={brain} sys={sys} onStatus={setBrain} onClose={() => { setIntelOpen(false); setSection("presence"); }} />}
       {aboutOpen && (
         <AboutModal
           sys={sys}
@@ -695,15 +712,141 @@ function FocusPanel() {
   );
 }
 
-function CollabPanel() {
+function CollabPanel({
+  turns,
+  busy,
+  ready,
+  onStop,
+  onClear,
+  onIntel,
+}: {
+  turns: Turn[];
+  busy: boolean;
+  ready: boolean;
+  onStop: () => void;
+  onClear: () => void;
+  onIntel: () => void;
+}) {
+  const end = useRef<HTMLLIElement>(null);
+  const last = turns[turns.length - 1];
+  useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [turns.length, last?.text]);
+  const meta = busy
+    ? <button className="panel-stop" onClick={onStop} title="Stop the reply" aria-label="Stop the reply"><Icon name="stop" size={12} /></button>
+    : turns.length > 0
+      ? <button className="ghost chat-clear" onClick={onClear}>Clear</button>
+      : <><span className={`dot ${ready ? "" : "off"}`} />{ready ? "Ready" : "No model"}</>;
   return (
-    <Panel icon="users" title="Agent Collaboration" meta={<><span className="dot off" />Idle</>}>
-      <div className="empty-state">
-        <div className="duo"><span className="c-sharee">S</span><span className="c-nexa">N</span></div>
-        <p>Sharee and Nexa start discussing once a model provider is connected in <b>Intelligence</b>.</p>
-        <small>Every message here will be a real exchange, with sources and confidence.</small>
-      </div>
+    <Panel icon="users" title="Conversation" meta={meta}>
+      {turns.length === 0 ? (
+        <div className="empty-state">
+          <div className="duo"><span className="c-sharee">S</span><span className="c-nexa">N</span></div>
+          {ready ? (
+            <>
+              <p>Say something below. Both answer, Sharee first, unless you name one of them.</p>
+              <small>Replies come from the brain chosen in Intelligence, streamed as they are written.</small>
+            </>
+          ) : (
+            <>
+              <p>Choose a brain in <button className="link" onClick={onIntel}>Intelligence</button> to talk to Sharee and Nexa.</p>
+              <small>On this Mac (offline) or a cloud provider with your own key.</small>
+            </>
+          )}
+        </div>
+      ) : (
+        <ul className="chat" aria-live="polite">
+          {turns.map((t) => (
+            <li key={t.id} className={`chat-turn ${t.who.toLowerCase()}`}>
+              <b>{t.who}</b>
+              {t.text ? <p>{t.text}{t.streaming && <span className="caret" aria-hidden="true" />}</p> : t.streaming ? <p className="muted">Thinking…</p> : null}
+              {t.error && <p className="chat-error">{t.error}</p>}
+              {t.brain && !t.streaming && <small>{t.brain}</small>}
+            </li>
+          ))}
+          <li ref={end} aria-hidden="true" />
+        </ul>
+      )}
     </Panel>
+  );
+}
+
+const fmtGB = (n: number) => `${(n / 1024 ** 3).toFixed(2)} GB`;
+
+function IntelligenceModal({
+  status,
+  sys,
+  onStatus,
+  onClose,
+}: {
+  status: BrainStatus | null;
+  sys: SystemInfo | null;
+  onStatus: (s: BrainStatus) => void;
+  onClose: () => void;
+}) {
+  const [keys, setKeys] = useState<Record<string, string>>({});
+  const [models, setModels] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const run = (p: Promise<BrainStatus | null>) =>
+    void p.then((s) => { if (s) { onStatus(s); setError(null); } }).catch((e) => setError(String(e)));
+  const local = status?.local;
+  const localNote = !status
+    ? "Open the desktop app to manage models."
+    : !local?.supported
+      ? "Runs on Apple Silicon Macs."
+      : !local.installed
+        ? "Not included in this build (development build). Release builds ship it inside the app."
+        : local.loaded
+          ? `Loaded · ${local.contextTokens?.toLocaleString() ?? "—"} token memory`
+          : "Installed · loads on the first message (about a second)";
+  return (
+    <div className="scrim" onClick={onClose}>
+      <div className="about-dialog intel-dialog" role="dialog" aria-label="Intelligence" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <Icon name="intelligence" size={22} />
+          <div>
+            <h3>Intelligence</h3>
+            <small>Choose the brain Sharee and Nexa think with</small>
+          </div>
+          <button className="ghost" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
+        </header>
+
+        <label className={`brain-card ${status?.active === "local" ? "on" : ""}`}>
+          <input type="radio" name="brain" checked={status?.active === "local"} disabled={!status}
+            onChange={() => run(ipc.brainSetActive("local"))} />
+          <div>
+            <b>On this Mac · {local?.name ?? "Qwen3.5 2B"}</b>
+            <small>Offline and private: nothing leaves your Mac. {local ? `${fmtGB(local.sizeBytes)} · ${local.licence}` : ""}{sys ? ` · ${formatBytes(sys.memoryBytes)} memory` : ""}</small>
+            <small className={local?.installed && local.supported ? "ok" : "warn"}>{localNote}</small>
+          </div>
+        </label>
+
+        <h4 className="intel-h">Cloud · your own key</h4>
+        {(status?.providers ?? []).map((p) => (
+          <div key={p.id} className={`brain-card ${status?.active === p.id ? "on" : ""}`}>
+            <input type="radio" name="brain" aria-label={`Use ${p.name}`} checked={status?.active === p.id}
+              onChange={() => run(ipc.brainSetActive(p.id))} />
+            <div>
+              <b>{p.name}{p.free && <span className="free-tag">Free key</span>}{p.hasKey && <span className="key-tag">Key saved</span>}</b>
+              <small>{p.note} <a href={p.keyUrl} target="_blank" rel="noreferrer">Get a key <Icon name="external" size={11} /></a></small>
+              <div className="brain-row">
+                <input type="password" autoComplete="off" spellCheck={false} placeholder={p.hasKey ? "Replace key…" : "Paste API key"}
+                  aria-label={`${p.name} API key`} value={keys[p.id] ?? ""} onChange={(e) => setKeys((k) => ({ ...k, [p.id]: e.target.value }))} />
+                <button className="secondary" disabled={!(keys[p.id] ?? "").trim()}
+                  onClick={() => { run(ipc.brainSaveKey(p.id, keys[p.id] ?? "")); setKeys((k) => ({ ...k, [p.id]: "" })); }}>Save</button>
+                {p.hasKey && <button className="ghost" onClick={() => run(ipc.brainClearKey(p.id))}>Remove</button>}
+              </div>
+              <div className="brain-row">
+                <input spellCheck={false} aria-label={`${p.name} model`} value={models[p.id] ?? p.model}
+                  onChange={(e) => setModels((m) => ({ ...m, [p.id]: e.target.value }))}
+                  onBlur={() => { const v = models[p.id]; if (v !== undefined && v !== p.model) run(ipc.brainSetModel(p.id, v || p.defaultModel)); }} />
+                <small>model</small>
+              </div>
+            </div>
+          </div>
+        ))}
+        {error && <p className="chat-error" role="alert">{error}</p>}
+        <p className="muted intel-foot">Keys are stored in your macOS Keychain and sent only to the provider you choose. Cloud replies send your conversation to that provider.</p>
+      </div>
+    </div>
   );
 }
 
@@ -773,14 +916,33 @@ function AwarenessPanel({ perms, setPerms, sys }: { perms: PermissionsView | nul
   );
 }
 
-function Dock({ onDraft, onSend }: { onDraft: (text: string) => void; onSend: () => void }) {
+function Dock({
+  onDraft,
+  onSend,
+  ready,
+  busy,
+  onIntel,
+}: {
+  onDraft: (text: string) => void;
+  onSend: (text: string) => void;
+  ready: boolean;
+  busy: boolean;
+  onIntel: () => void;
+}) {
   const [text, setText] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const hint = useCycle(["Talk to Sharee, Nexa, or both…", "Ask Nexa to plan your morning…", "Ask Sharee to review your project…", "Ask both to debate an idea…"], 4200);
   return (
     <footer className="dock">
       <div className="talk-wrap">
-        <form className="talk" onSubmit={(e) => { e.preventDefault(); if (text.trim()) { onSend(); setNote("Connect a model provider in Intelligence to talk to Sharee and Nexa."); } }}>
+        <form className="talk" onSubmit={(e) => {
+          e.preventDefault();
+          if (!text.trim() || busy) return;
+          if (!ready) { setNote("Choose a brain in Intelligence to talk to Sharee and Nexa."); return; }
+          onSend(text);
+          setText("");
+          onDraft("");
+        }}>
           <Icon name="wave" size={24} />
           <span className="talk-field">
             <input value={text} onChange={(e) => { setText(e.target.value); onDraft(e.target.value); setNote(null); }} aria-label="Message to Sharee and Nexa" />
@@ -795,7 +957,7 @@ function Dock({ onDraft, onSend }: { onDraft: (text: string) => void; onSend: ()
           <button key={l} className="quick-btn" data-spot disabled title="Arrives with its milestone"><Icon name={i} size={20} />{l}</button>
         ))}
       </div>
-      {note && <p className="dock-note" role="status">{note}</p>}
+      {note && <p className="dock-note" role="status">{note} <button className="link" onClick={() => { setNote(null); onIntel(); }}>Open Intelligence</button></p>}
     </footer>
   );
 }
