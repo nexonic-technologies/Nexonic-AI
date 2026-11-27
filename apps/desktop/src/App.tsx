@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { presenceLabel, type MotionLevel, type PresenceState, type Theme } from "@nexonic/design-system";
 import { Icon, type IconName } from "./components/Icon";
 import { NeuralCore, NODE_COLORS } from "./components/NeuralCore";
+import { DataLinks } from "./components/DataLinks";
 import { LiveFace, type FaceAtlas, type Gaze, type Mood } from "./components/LiveFace";
 import { VideoFace, type ClipName, type ClipSet, type FaceBox } from "./components/VideoFace";
 import { MOOD_LABEL, TEMPERAMENT, usePresenceMood } from "./lib/presenceMood";
@@ -133,6 +134,7 @@ export function App() {
   const [nodePos, setNodePos] = usePersisted<Partial<Record<Node, { x: number; y: number }>>>("node-pos", {});
   const nodeDrag = useRef<{ id: Node; sx: number; sy: number; moved: boolean } | null>(null);
   const [hoverNode, setHoverNode] = useState<Node | null>(null);
+  const [burst, setBurst] = useState<{ id: string; at: number } | null>(null);
   const [draft, setDraft] = useState("");
   const [sentAt, setSentAt] = useState(0);
   const [greetAt, setGreetAt] = useState<Record<Agent, number>>({ Sharee: 0, Nexa: 0 });
@@ -269,14 +271,12 @@ export function App() {
                 const sideClass = n.pos.endsWith("l") ? "left" : "right";
                 return (
                   <g key={n.id} className={`trace ${sideClass} ${active ? "active" : ""}`} style={{ ["--node-c" as string]: NODE_COLORS[n.id] }}>
-                    <path className="trace-base" d={tracePath(n, nodePos[n.id]).d} />
-                    <path className="trace-pulse" d={tracePath(n, nodePos[n.id]).d} />
-                    <circle className="trace-dot" cx={tracePath(n, nodePos[n.id]).pin[0]} cy={tracePath(n, nodePos[n.id]).pin[1]} r="3" />
-                    <circle className="trace-dot" cx={tracePath(n, nodePos[n.id]).hub[0]} cy={tracePath(n, nodePos[n.id]).hub[1]} r="3.5" />
+                    <path className="trace-base" data-flow={n.id} d={tracePath(n, nodePos[n.id]).d} />
                   </g>
                 );
               })}
             </svg>
+            <DataLinks colors={NODE_COLORS} focus={coreFocus} burst={burst} activity={coreActivity} reduced={reduced} layoutKey={JSON.stringify(nodePos)} />
             <span className="sr-only" role="status">Collective Intelligence core · {coreActivity > 0 ? "active" : "idle"}</span>
             {nodes.map((n) => (
               <button key={n.id} className={`node ${n.pos} ${nodePos[n.id] ? "moved" : ""}`} data-node={n.id} data-spot aria-pressed={node === n.id}
@@ -301,7 +301,7 @@ export function App() {
                 onPointerUp={(e) => {
                   const d = nodeDrag.current;
                   nodeDrag.current = null;
-                  if (d && !d.moved && e.detail < 2) setNode(n.id);
+                  if (d && !d.moved && e.detail < 2) { setNode(n.id); setBurst({ id: n.id, at: performance.now() }); }
                 }}
                 onDoubleClick={() => { setNode(null); setNodePos((p) => { const q = { ...p }; delete q[n.id]; return q; }); }}
                 onPointerEnter={() => setHoverNode(n.id)} onPointerLeave={() => setHoverNode(null)} onFocus={() => setHoverNode(n.id)} onBlur={() => setHoverNode(null)}>
