@@ -26,6 +26,8 @@ dist/
 /recordings/
 /adapters/
 /models/
+# Model weights are downloaded and checksum-verified at build time, never committed
+*.gguf
 
 # Local design references (redistribution rights not verified)
 /design-references/
