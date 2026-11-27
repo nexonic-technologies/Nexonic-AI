@@ -626,3 +626,6 @@ html[data-theme="light"] .stage .modes { margin-bottom: var(--sp-2); }
 .presence .holo-scan { display: none; }
 .portrait.live,
 .presence.is-active .portrait.live { filter: none; }
+
+/* Node lines are drawn by DataLinks as fibres that dissolve into the core */
+.links .trace-base, .links .hud-ring { stroke: transparent !important; }
