@@ -27,11 +27,17 @@ export const NODE_ANGLES: Record<string, number> = {
   Sharee: Math.PI, Nexa: 0,
 };
 
+/** Each node has its own colour; the core is painted with them around the ring. */
+export const NODE_COLORS: Record<string, string> = {
+  Reasoning: "#9d7bff", Perception: "#3fc8ff", Memory: "#ff5fa8", Planning: "#9ef05a", Learning: "#ffd24a", Action: "#ff7a45",
+};
+const NODE_ORDER = ["Reasoning", "Perception", "Memory", "Planning", "Learning", "Action"] as const;
+
 const BUDGET: Record<MotionLevel, { lines: number; seg: number; spikes: number; dust: number; nucleus: number }> = {
   off: { lines: 0, seg: 0, spikes: 0, dust: 0, nucleus: 0 },
-  minimal: { lines: 260, seg: 48, spikes: 500, dust: 600, nucleus: 1400 },
-  balanced: { lines: 620, seg: 64, spikes: 1100, dust: 1500, nucleus: 3200 },
-  cinematic: { lines: 1100, seg: 80, spikes: 1800, dust: 2600, nucleus: 5200 },
+  minimal: { lines: 260, seg: 48, spikes: 500, dust: 600, nucleus: 2600 },
+  balanced: { lines: 620, seg: 64, spikes: 1100, dust: 1500, nucleus: 6400 },
+  cinematic: { lines: 1100, seg: 80, spikes: 1800, dust: 2600, nucleus: 10000 },
 };
 
 const R = 1.72; // major radius
@@ -93,6 +99,13 @@ export function NeuralCore({
       uPtrK: { value: 0 },
       uPtrVel: { value: new THREE.Vector2(0, 0) },
       uRip: { value: [0, 1, 2, 3].map(() => new THREE.Vector4(0, 0, -99, 0)) },
+      uNode: { value: NODE_ORDER.map((n) => new THREE.Color(NODE_COLORS[n])) },
+      uNodeA: { value: NODE_ORDER.map((n) => NODE_ANGLES[n]!) },
+      // Slow automatic drift of the colours around the ring (decorative).
+      uSpin: { value: 0 },
+      // A hovered node floods the core with its colour.
+      uFocusCol: { value: new THREE.Color("#ffffff") },
+      uFocusK: { value: 0 },
     };
 
     const bandGLSL = /* glsl */ `
@@ -131,7 +144,31 @@ export function NeuralCore({
         }
         return disp;
       }
-      vec3 tint(vec2 b){ vec3 c = uBase * 0.85; c = mix(c, uSharee * 1.3, clamp(b.x * 1.25, 0.0, 1.0)); c = mix(c, uNexa * 1.3, clamp(b.y * 1.25, 0.0, 1.0)); return c; }
+      uniform vec3 uNode[6];
+      uniform float uNodeA[6];
+      uniform float uSpin, uFocusK;
+      uniform vec3 uFocusCol;
+      // Colour of the ring at angle th: a soft blend of the six node colours.
+      vec3 palette(float th){
+        vec3 acc = vec3(0.0); float ws = 0.0;
+        for (int i = 0; i < 6; i++) {
+          float w = exp(-pow(wrapd(th, uNodeA[i] + uSpin) / 0.62, 2.0));
+          acc += uNode[i] * w; ws += w;
+        }
+        return acc / max(ws, 1e-3);
+      }
+      vec3 tint(vec2 b, float th){
+        vec3 c = palette(th) * 1.08;
+        // the sector under the cursor flares in its own colour
+        float pa = atan(uPtr.y, uPtr.x);
+        float near = uPtrK * exp(-pow(wrapd(th, pa) / 0.5, 2.0));
+        c = mix(c, palette(pa) * 1.6, near * 0.75);
+        c = mix(c, uFocusCol * 1.4, uFocusK * 0.7);
+        // Sharee's and Nexa's bands still orbit through it
+        c = mix(c, uSharee * 1.3, clamp(b.x * 0.5, 0.0, 1.0));
+        c = mix(c, uNexa * 1.3, clamp(b.y * 0.5, 0.0, 1.0));
+        return c;
+      }
     `;
 
     // ---------- Streamlines ----------
@@ -192,7 +229,7 @@ export function NeuralCore({
           float pulse = pow(0.5 + 0.5 * sin((aU * 6.0 - uTime * speed * 6.0 + aSeed * 40.0)), 8.0);
           float g;
           vec3 p = position + field(position, g);
-          vCol = tint(b) + vec3(0.35, 0.45, 0.6) * g;
+          vCol = tint(b, aTheta) + vec3(0.35, 0.45, 0.6) * g;
           float edge = smoothstep(0.0, 0.08, aU) * smoothstep(1.0, 0.92, aU);
           vA = edge * (0.07 + 0.22 * pulse + 0.32 * (b.x + b.y) + 0.55 * g) * (1.0 + uActivity * 0.8) * mix(1.0, 1.6, uLight);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
@@ -247,7 +284,7 @@ export function NeuralCore({
           vec3 dirN = normalize(mix(n, toPtr, clamp(g * 1.6, 0.0, 0.9)));
           float grow = aLen * (0.18 + 1.6 * k + uActivity * 0.6 + 1.4 * g);
           vec3 p = base + dirN * grow * aTip;
-          vCol = tint(b) + vec3(0.3, 0.4, 0.55) * g;
+          vCol = tint(b, aTheta) + vec3(0.3, 0.4, 0.55) * g;
           vA = mix(0.5, 0.0, aTip) * (0.15 + 0.85 * k + 0.9 * g);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         }`,
@@ -286,7 +323,7 @@ export function NeuralCore({
           vec2 b = bands(th);
           float g;
           p += field(p, g) * 1.6;
-          vCol = tint(b) + vec3(0.2) + vec3(0.3, 0.4, 0.5) * g;
+          vCol = tint(b, th) + vec3(0.2) + vec3(0.3, 0.4, 0.5) * g;
           vA = (0.25 + 0.75 * (b.x + b.y) + g) * (0.4 + aSeed.z * 0.6);
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_PointSize = (1.0 + aSeed.z * 2.2 + (b.x + b.y) * 1.5) * uPixel * (7.4 / -mv.z);
@@ -331,12 +368,13 @@ export function NeuralCore({
           p.xy += 0.08 * vec2(sin(p.y * 3.0 + uTime * 0.8), cos(p.x * 3.0 - uTime * 0.7));
           float g;
           p += field(p, g) * 1.2;
-          vec2 b = bands(atan(p.y, p.x));
+          float pth = atan(p.y, p.x);
+          vec2 b = bands(pth);
           float core = 1.0 - aSeed.z;
-          vCol = mix(tint(b), vec3(0.85, 0.92, 1.0), core * 0.5) + vec3(0.3, 0.4, 0.55) * g;
-          vA = (0.22 + 0.5 * (b.x + b.y) * aSeed.z + 0.6 * core * core + g) * (0.35 + aSeed.w * 0.65);
+          vCol = mix(tint(b, pth), vec3(0.85, 0.92, 1.0), core * 0.35) + vec3(0.3, 0.4, 0.55) * g;
+          vA = (0.42 + 0.5 * (b.x + b.y) * aSeed.z + 0.7 * core * core + uFocusK * 0.25 + g) * (0.45 + aSeed.w * 0.65);
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
-          gl_PointSize = (0.9 + aSeed.w * 1.8 + core * 1.4) * uPixel * (7.4 / -mv.z);
+          gl_PointSize = (1.2 + aSeed.w * 2.2 + core * 1.8) * uPixel * (7.4 / -mv.z);
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: /* glsl */ `
@@ -409,7 +447,7 @@ export function NeuralCore({
     const onDown = (e: PointerEvent) => {
       if (reduced || e.button !== 0) return;
       const t = e.target as HTMLElement | null;
-      if (!t || !stage.contains(t) || t.closest("button:not(.core-label), a, input, textarea, select, .presence")) return;
+      if (!t || !stage.contains(t) || t.closest("button, a, input, textarea, select, .presence")) return;
       drag = { x: e.clientX, y: e.clientY, moved: 0, t: performance.now() };
       spinVel.set(0, 0);
       stage.dataset.dragging = "true";
@@ -454,6 +492,7 @@ export function NeuralCore({
     const onVis = () => { visible = document.visibilityState === "visible"; last = performance.now(); };
     document.addEventListener("visibilitychange", onVis);
     let band = 1.2;
+    const focusColor = new THREE.Color();
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
@@ -471,6 +510,13 @@ export function NeuralCore({
         band += dt * (0.32 + shared.uActivity.value * 1.4) * (reduced ? 0.2 : 1);
       }
       shared.uBand.value = band;
+
+      // colours drift by themselves; faster while the cursor plays with the core
+      shared.uSpin.value += dt * (0.09 + shared.uPtrK.value * 0.35) * (reduced ? 0.15 : 1);
+      const f = focusRef.current;
+      const fc = f ? NODE_COLORS[f] : undefined;
+      if (fc) shared.uFocusCol.value.lerp(focusColor.set(fc), Math.min(dt * 8, 1));
+      shared.uFocusK.value += ((fc ? 1 : 0) - shared.uFocusK.value) * Math.min(dt * 5, 1);
 
       shared.uClock.value += dt;
       // pointer field strength fades in near the core and out when the cursor leaves

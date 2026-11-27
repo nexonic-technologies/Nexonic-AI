@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { presenceLabel, type MotionLevel, type PresenceState, type Theme } from "@nexonic/design-system";
 import { Icon, type IconName } from "./components/Icon";
-import { NeuralCore } from "./components/NeuralCore";
+import { NeuralCore, NODE_COLORS } from "./components/NeuralCore";
 import { LiveFace, type FaceAtlas, type Gaze, type Mood } from "./components/LiveFace";
 import { VideoFace, type ClipName, type ClipSet, type FaceBox } from "./components/VideoFace";
 import { MOOD_LABEL, TEMPERAMENT, usePresenceMood } from "./lib/presenceMood";
@@ -268,7 +268,7 @@ export function App() {
                 const active = hoverNode === n.id || node === n.id;
                 const sideClass = n.pos.endsWith("l") ? "left" : "right";
                 return (
-                  <g key={n.id} className={`trace ${sideClass} ${active ? "active" : ""}`}>
+                  <g key={n.id} className={`trace ${sideClass} ${active ? "active" : ""}`} style={{ ["--node-c" as string]: NODE_COLORS[n.id] }}>
                     <path className="trace-base" d={tracePath(n, nodePos[n.id]).d} />
                     <path className="trace-pulse" d={tracePath(n, nodePos[n.id]).d} />
                     <circle className="trace-dot" cx={tracePath(n, nodePos[n.id]).pin[0]} cy={tracePath(n, nodePos[n.id]).pin[1]} r="3" />
@@ -277,20 +277,10 @@ export function App() {
                 );
               })}
             </svg>
-            <button
-              type="button"
-              className="core-label"
-              aria-label="Collective Intelligence Core (click to send a ripple)"
-            >
-              <Icon name="wave" size={24} />
-              <strong><SplitText text="COLLECTIVE" delay={300} stagger={30} /><SplitText text="INTELLIGENCE" delay={420} stagger={30} /></strong>
-              <span><ScrambleText text="SHAREE" delay={700} className="c-sharee" /> × <ScrambleText text="NEXA" delay={760} className="c-nexa" /></span>
-              <b className="inf">∞</b>
-              <em><RollText value={coreActivity > 0 ? "ACTIVE" : "IDLE"} /></em>
-            </button>
+            <span className="sr-only" role="status">Collective Intelligence core · {coreActivity > 0 ? "active" : "idle"}</span>
             {nodes.map((n) => (
               <button key={n.id} className={`node ${n.pos} ${nodePos[n.id] ? "moved" : ""}`} data-node={n.id} data-spot aria-pressed={node === n.id}
-                style={nodePos[n.id] ? { left: `${nodePos[n.id]!.x}%`, top: `${nodePos[n.id]!.y}%`, right: "auto", bottom: "auto" } : undefined}
+                style={{ ["--node-c" as string]: NODE_COLORS[n.id], ...(nodePos[n.id] ? { left: `${nodePos[n.id]!.x}%`, top: `${nodePos[n.id]!.y}%`, right: "auto", bottom: "auto" } : {}) }}
                 title="Drag to move · double-click to put back"
                 onPointerDown={(e) => {
                   if (e.button !== 0) return;
