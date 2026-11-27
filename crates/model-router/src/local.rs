@@ -11,10 +11,27 @@ use llama_cpp_2::sampling::LlamaSampler;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread;
 
 const BATCH: usize = 512;
+
+/// llama.cpp can be initialised once per process; every engine shares it.
+static BACKEND: OnceLock<Result<LlamaBackend, String>> = OnceLock::new();
+
+fn backend() -> Result<&'static LlamaBackend, RouterError> {
+    BACKEND
+        .get_or_init(|| {
+            LlamaBackend::init()
+                .map(|mut b| {
+                    b.void_logs();
+                    b
+                })
+                .map_err(|e| e.to_string())
+        })
+        .as_ref()
+        .map_err(|e| RouterError::LocalUnavailable(format!("llama.cpp: {e}")))
+}
 
 enum Event {
     Token(String),
@@ -135,19 +152,16 @@ fn worker(
     jobs: &mpsc::Receiver<Job>,
     ready: &mpsc::Sender<Result<(), RouterError>>,
 ) {
-    let mut backend = match LlamaBackend::init() {
+    let backend = match backend() {
         Ok(b) => b,
         Err(e) => {
-            let _ = ready.send(Err(RouterError::LocalUnavailable(format!(
-                "llama.cpp: {e}"
-            ))));
+            let _ = ready.send(Err(e));
             return;
         }
     };
-    backend.void_logs();
     // llama.cpp caps this at the real layer count.
     let params = LlamaModelParams::default().with_n_gpu_layers(gpu_layers);
-    let model = match LlamaModel::load_from_file(&backend, path, &params) {
+    let model = match LlamaModel::load_from_file(backend, path, &params) {
         Ok(m) => m,
         Err(e) => {
             let _ = ready.send(Err(RouterError::LocalUnavailable(format!(
@@ -159,7 +173,7 @@ fn worker(
     let _ = ready.send(Ok(()));
     for job in jobs {
         let events = job.events.clone();
-        let result = generate(&backend, &model, ctx_tokens, &job);
+        let result = generate(backend, &model, ctx_tokens, &job);
         let _ = events.send(Event::Done(result));
     }
 }
