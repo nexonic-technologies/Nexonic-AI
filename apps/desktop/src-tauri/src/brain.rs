@@ -394,12 +394,12 @@ fn local_reply(
         let path = find_model(app).ok_or_else(|| {
             RouterError::LocalUnavailable("the model is not installed in this build".into())
         })?;
-        let mut sys = sysinfo::System::new();
-        sys.refresh_memory();
-        *slot = Some(LocalEngine::start(
-            &path,
-            context_for_memory(sys.total_memory()),
-        )?);
+        // Smallest context if memory cannot be read.
+        let memory = sysinfo::System::new().map_or(0, |mut sys| {
+            sys.refresh_memory();
+            sys.total_memory()
+        });
+        *slot = Some(LocalEngine::start(&path, context_for_memory(memory))?);
     }
     let engine = slot.as_ref().expect("engine was just loaded");
     engine.chat(messages, opts, Arc::clone(&brain.stop), send)

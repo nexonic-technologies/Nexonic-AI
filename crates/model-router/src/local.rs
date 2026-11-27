@@ -57,8 +57,17 @@ pub fn context_for_memory(memory_bytes: u64) -> u32 {
 }
 
 impl LocalEngine {
-    /// Loads the model (about a second on Apple Silicon) and starts the worker.
+    /// Loads the model and starts the worker, with every layer on the GPU
+    /// (`NEXONIC_GPU_LAYERS` overrides, e.g. 0 for CPU only).
     pub fn start(path: &Path, ctx_tokens: u32) -> Result<Self, RouterError> {
+        let gpu_layers = std::env::var("NEXONIC_GPU_LAYERS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1000);
+        Self::start_with(path, ctx_tokens, gpu_layers)
+    }
+
+    pub fn start_with(path: &Path, ctx_tokens: u32, gpu_layers: u32) -> Result<Self, RouterError> {
         if !path.is_file() {
             return Err(RouterError::LocalUnavailable(format!(
                 "model file not found at {}",
@@ -70,7 +79,7 @@ impl LocalEngine {
         let model_path = path.to_path_buf();
         thread::Builder::new()
             .name("nexonic-local-model".into())
-            .spawn(move || worker(&model_path, ctx_tokens, &rx, &ready_tx))
+            .spawn(move || worker(&model_path, ctx_tokens, gpu_layers, &rx, &ready_tx))
             .map_err(|e| RouterError::LocalUnavailable(format!("could not start worker: {e}")))?;
         ready_rx
             .recv()
@@ -122,6 +131,7 @@ impl LocalEngine {
 fn worker(
     path: &Path,
     ctx_tokens: u32,
+    gpu_layers: u32,
     jobs: &mpsc::Receiver<Job>,
     ready: &mpsc::Sender<Result<(), RouterError>>,
 ) {
@@ -135,8 +145,8 @@ fn worker(
         }
     };
     backend.void_logs();
-    // All layers on the GPU (Metal); llama.cpp caps this at the real layer count.
-    let params = LlamaModelParams::default().with_n_gpu_layers(1000);
+    // llama.cpp caps this at the real layer count.
+    let params = LlamaModelParams::default().with_n_gpu_layers(gpu_layers);
     let model = match LlamaModel::load_from_file(&backend, path, &params) {
         Ok(m) => m,
         Err(e) => {
@@ -262,31 +272,59 @@ mod tests {
         assert!(matches!(err, RouterError::LocalUnavailable(_)));
     }
 
-    /// Runs the real model. CI sets NEXONIC_MODEL to the bundled GGUF on the Mac runner.
-    #[test]
-    #[ignore = "needs the model file (set NEXONIC_MODEL)"]
-    fn real_model_answers() {
+    fn timed_run(gpu_layers: u32) {
         let path = std::env::var("NEXONIC_MODEL").expect("set NEXONIC_MODEL");
-        let engine = LocalEngine::start(Path::new(&path), 4096).expect("model loads");
-        let mut streamed = String::new();
         let t0 = std::time::Instant::now();
+        let engine =
+            LocalEngine::start_with(Path::new(&path), 4096, gpu_layers).expect("model loads");
+        let load = t0.elapsed();
+        let mut streamed = String::new();
+        let mut first: Option<std::time::Duration> = None;
+        let mut pieces = 0u32;
+        let t1 = std::time::Instant::now();
         let reply = engine
             .chat(
                 vec![
-                    Message::new(Role::System, "You are Nexa. Answer in one short sentence."),
-                    Message::new(Role::User, "What is the capital of France?"),
+                    Message::new(Role::System, "You are Nexa. Answer in two short sentences."),
+                    Message::new(
+                        Role::User,
+                        "What is the capital of France, and one thing it is famous for?",
+                    ),
                 ],
                 GenOptions {
-                    max_tokens: 60,
+                    max_tokens: 80,
                     temperature: 0.2,
                 },
                 Arc::new(StopFlag::default()),
-                &mut |t| streamed.push_str(t),
+                &mut |t| {
+                    first.get_or_insert_with(|| t1.elapsed());
+                    pieces += 1;
+                    streamed.push_str(t);
+                },
             )
             .expect("model replies");
-        println!("reply in {:?}: {reply}", t0.elapsed());
+        let total = t1.elapsed();
+        let first = first.unwrap_or(total);
+        let gen = total.saturating_sub(first).as_secs_f64().max(1e-3);
+        println!(
+            "gpu_layers={gpu_layers} load={load:?} first_token={first:?} total={total:?} pieces={pieces} ~{:.1} tok/s\nreply: {reply}",
+            f64::from(pieces.saturating_sub(1)) / gen
+        );
         assert!(reply.to_lowercase().contains("paris"), "{reply}");
         assert_eq!(streamed.trim(), reply);
         assert!(!reply.contains("<think>"));
+    }
+
+    /// Runs the real model. CI sets NEXONIC_MODEL to the bundled GGUF on the Mac runner.
+    #[test]
+    #[ignore = "needs the model file (set NEXONIC_MODEL)"]
+    fn real_model_answers_gpu() {
+        timed_run(1000);
+    }
+
+    #[test]
+    #[ignore = "needs the model file (set NEXONIC_MODEL)"]
+    fn real_model_answers_cpu() {
+        timed_run(0);
     }
 }

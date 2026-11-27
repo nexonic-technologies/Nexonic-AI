@@ -61,7 +61,7 @@ jobs:
       - name: On-device model answers (real inference)
         env:
           NEXONIC_MODEL: ${{ github.workspace }}/apps/desktop/src-tauri/models/qwen3.5-2b-q4_k_m.gguf
-        run: cargo test -p nexonic-model-router --features local --release -- --ignored --nocapture
+        run: cargo test -p nexonic-model-router --features local --release -- --ignored --nocapture --test-threads=1
       - name: Build app and DMG (ad-hoc signed, model inside)
         run: npm run tauri -- build --target aarch64-apple-darwin --config src-tauri/tauri.model.conf.json
       - name: Verify bundle and write checksums
