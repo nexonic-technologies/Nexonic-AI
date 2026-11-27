@@ -42,8 +42,28 @@ jobs:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: npm ci --no-audit --no-fund
-      - name: Build app and DMG (ad-hoc signed)
-        run: npm run tauri -- build --target aarch64-apple-darwin
+      # The on-device brain ships inside the app. Pinned file, verified by SHA-256.
+      - name: Restore bundled model
+        id: model
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/desktop/src-tauri/models
+          key: model-qwen3.5-2b-q4_k_m-aaf42c8b7c3cab2b
+      - name: Download bundled model
+        if: steps.model.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p apps/desktop/src-tauri/models
+          curl -fL --retry 3 -o apps/desktop/src-tauri/models/qwen3.5-2b-q4_k_m.gguf \
+            "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf"
+      - name: Verify bundled model
+        run: |
+          echo "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223  apps/desktop/src-tauri/models/qwen3.5-2b-q4_k_m.gguf" | shasum -a 256 -c -
+      - name: On-device model answers (real inference)
+        env:
+          NEXONIC_MODEL: ${{ github.workspace }}/apps/desktop/src-tauri/models/qwen3.5-2b-q4_k_m.gguf
+        run: cargo test -p nexonic-model-router --features local --release -- --ignored --nocapture --test-threads=1
+      - name: Build app and DMG (ad-hoc signed, model inside)
+        run: npm run tauri -- build --target aarch64-apple-darwin --config src-tauri/tauri.model.conf.json
       - name: Verify bundle and write checksums
         run: |
           B=target/aarch64-apple-darwin/release/bundle
@@ -52,6 +72,7 @@ jobs:
           codesign --verify --deep --strict "$APP" && echo "codesign: valid (ad-hoc)"
           plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist" | grep -qx com.nexonictechnologies.ai
           lipo -archs "$APP/Contents/MacOS/"* | tee /dev/stderr | grep -q arm64
+          test -f "$APP/Contents/Resources/models/qwen3.5-2b-q4_k_m.gguf" && echo "model: bundled"
           ls "$B"/dmg/*.dmg
           (cd "$B/dmg" && shasum -a 256 *.dmg | tee SHA256SUMS.txt)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

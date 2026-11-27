@@ -36,3 +36,6 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy $PKGS --all-targets --locked -- -D warnings
       - run: cargo test $PKGS --locked
+      # The on-device engine (llama.cpp; Metal on Apple Silicon).
+      - run: cargo clippy -p nexonic-model-router --all-targets --features local --locked -- -D warnings
+      - run: cargo test -p nexonic-model-router --features local --locked

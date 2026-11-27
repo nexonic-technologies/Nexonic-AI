@@ -29,8 +29,8 @@ Status: ✅ done · 🔶 in progress · ⛔ blocked · ⬜ pending
 | | Milestone | Status |
 |---|---|---|
 | M16 | Independent cognitive agent runtimes | ⬜ |
-| M17 | OpenRouter and BYOK providers | 🔶 OpenRouter router, Keychain key, cooldown fallback, Intelligence UI |
-| M18 | Embedded local inference | ⬜ |
+| M17 | OpenRouter and BYOK providers | ✅ OpenRouter router + OpenAI, Anthropic, DeepSeek own keys |
+| M18 | Embedded local inference | ✅ Qwen3.5 2B inside the app (llama.cpp, Metal) |
 | M19 | Multi-model routing | ⬜ |
 | M20 | Independent cognitive memory engines | 🔶 isolation + encrypted persistence done |
 | M21 | Collective Intelligence and agent communication | ⬜ |
