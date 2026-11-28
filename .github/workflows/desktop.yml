@@ -1,8 +1,8 @@
 name: Desktop
 
 # Builds the macOS app (Apple Silicon) on every push and PR, and uploads the
-# ad-hoc-signed .dmg as a workflow artifact. Pushing a version tag (v1.2.3)
-# also publishes that DMG as a GitHub release.
+# ad-hoc-signed .dmg as a workflow artifact. A version tag (v1.2.3), pushed or
+# created with a release on github.com, also publishes that DMG on the release.
 on:
   push:
     branches: ["**"]
@@ -102,10 +102,16 @@ jobs:
           gh run download "${{ github.run_id }}" -n nexonic-ai-macos-arm64 -D dist
           ls -la dist
           (cd dist && shasum -a 256 -c SHA256SUMS.txt)
-      - name: Create the release
+      # A release made on github.com (which also creates the tag) gets the DMG
+      # attached; otherwise the release is created here.
+      - name: Create the release or attach the DMG
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$TAG" dist/*.dmg dist/SHA256SUMS.txt \
-            --title "Nexonic AI $TAG" --notes-file docs/RELEASE_NOTES.md --verify-tag
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.dmg dist/SHA256SUMS.txt --clobber
+          else
+            gh release create "$TAG" dist/*.dmg dist/SHA256SUMS.txt \
+              --title "Nexonic AI $TAG" --notes-file docs/RELEASE_NOTES.md --verify-tag
+          fi
