@@ -16,7 +16,7 @@ Status: ✅ done · 🔶 in progress · ⛔ blocked · ⬜ pending
 | M05 | Creative direction and design coverage matrix | ✅ |
 | M06 | Design system, typography, motion primitives | ✅ tokens, themes, motion levels |
 | M07 | Native desktop shell and navigation | 🔶 shell + dashboard; other sections next |
-| M08 | Dual and individual presence | ⬜ |
+| M08 | Dual and individual presence | 🔶 front-facing video Sharee and Nexa, partner chat, honest states |
 | M09 | Adaptive Visual Hub | ⬜ |
 | M10 | Collective Intelligence neural core | 🔶 v2 motion + interaction done; real event wiring with M16 |
 | M11 | Cognitive Memory and Evolution Studios | ⬜ |
@@ -30,11 +30,11 @@ Status: ✅ done · 🔶 in progress · ⛔ blocked · ⬜ pending
 ## Phase C — Core intelligence
 | | Milestone | Status |
 |---|---|---|
-| M16 | Independent cognitive agent runtimes | ⬜ |
+| M16 | Independent cognitive agent runtimes | 🔶 each agent recalls only its own and shared memory |
 | M17 | OpenRouter and BYOK providers | ✅ OpenRouter router + OpenAI, Anthropic, DeepSeek own keys |
 | M18 | Embedded local inference | ✅ Qwen3.5 2B inside the app (llama.cpp, Metal) |
 | M19 | Multi-model routing | ⬜ |
-| M20 | Independent cognitive memory engines | 🔶 isolation + encrypted persistence done |
+| M20 | Independent cognitive memory engines | 🔶 isolation, encrypted persistence, conversation memory with consent |
 | M21 | Collective Intelligence and agent communication | ⬜ |
 | M22 | Confidentiality and information-flow enforcement | 🔶 storage layer done |
 | M23 | Memory consolidation | ⬜ |
@@ -47,6 +47,6 @@ original voices, three-way voice conversations, lip synchronization.
 Computer control, file search and documents, proactive advice, personality evolution,
 behavioral learning, skill acquisition, mutual learning, local fine-tuning, background runtime.
 
-## Phase F — Commercial architecture and production quality (M41–M50) — ⬜
+## Phase F — Commercial architecture and production quality (M41–M50) — ⬜ (M47 packaging started: v0.1.0 preview DMG published by the release workflow)
 Personalization, licensing foundation, hardening, performance, design review, end-to-end tests,
 packaging, DMG verification, evaluation framework, documentation and Windows roadmap.

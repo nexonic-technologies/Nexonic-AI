@@ -121,7 +121,7 @@ export interface ChatTurn {
   role: ChatRole;
   content: string;
 }
-export type ReplyEvent = { kind: "start"; brain: string } | { kind: "token"; text: string };
+export type ReplyEvent = { kind: "start"; brain: string; remembered: number } | { kind: "token"; text: string };
 
 export const inDesktop = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -147,6 +147,12 @@ export const ipc = {
     neverShareWith: string[] = [],
   ) => call<MemoryView>("remember_note", { text, domain, kind, neverShareWith }),
   forgetMemory: (id: number) => call<void>("forget_memory", { id }),
+  /** Whether conversations are remembered (off by default). */
+  memoryConsent: () => call<boolean>("memory_consent"),
+  memorySetConsent: (on: boolean) => call<boolean>("memory_set_consent", { on }),
+  /** Keeps "remember that …" facts, and the exchange itself when allowed. */
+  rememberExchange: (userText: string, replies: { agent: "Sharee" | "Nexa"; text: string }[]) =>
+    call<number>("remember_exchange", { userText, replies }),
   kvGet: (key: string) => call<string | null>("kv_get", { key }),
   kvSet: (key: string, value: string) => call<void>("kv_set", { key, value }),
   checkUpdates: () => call<UpdateStatus>("check_updates"),

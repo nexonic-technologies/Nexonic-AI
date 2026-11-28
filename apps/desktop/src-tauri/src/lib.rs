@@ -6,6 +6,7 @@
 
 mod brain;
 mod keychain;
+mod recall;
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -18,7 +19,7 @@ use nexonic_model_router::{
     OpenRouterHttpTransport, RouterConfig,
 };
 use nexonic_permissions::{Actor, Capability, Decision, Permissions, Scope};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 
 /// Shared application state behind the IPC boundary.
@@ -382,6 +383,44 @@ fn forget_memory(state: State<'_, AppState>, id: u64) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Whether conversations are remembered (off until the user turns it on).
+#[tauri::command]
+fn memory_consent(state: State<'_, AppState>) -> Result<bool, String> {
+    let m = state.memory.lock().map_err(|e| e.to_string())?;
+    Ok(recall::consent(&m))
+}
+
+#[tauri::command]
+fn memory_set_consent(state: State<'_, AppState>, on: bool) -> Result<bool, String> {
+    let mut m = state.memory.lock().map_err(|e| e.to_string())?;
+    m.put(recall::CONSENT_KEY, if on { "on" } else { "off" })
+        .map_err(|e| e.to_string())?;
+    Ok(recall::consent(&m))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReplyNote {
+    pub agent: String,
+    pub text: String,
+}
+
+/// Called once per exchange, after Sharee and/or Nexa replied. Keeps
+/// "remember that …" facts always, and the exchange itself only with consent.
+/// Returns how many records were written.
+#[tauri::command]
+fn remember_exchange(
+    state: State<'_, AppState>,
+    user_text: String,
+    replies: Vec<ReplyNote>,
+) -> Result<usize, String> {
+    let replies: Vec<(AgentId, String)> = replies
+        .into_iter()
+        .filter_map(|r| recall::agent_id(&r.agent).map(|a| (a, r.text)))
+        .collect();
+    let mut m = state.memory.lock().map_err(|e| e.to_string())?;
+    recall::store_exchange(&mut m, &user_text, &replies)
+}
+
 #[tauri::command]
 fn kv_get(state: State<'_, AppState>, key: String) -> Result<Option<String>, String> {
     if key.trim().is_empty() {
@@ -662,6 +701,9 @@ pub fn run() {
             memories_recent,
             remember_note,
             forget_memory,
+            memory_consent,
+            memory_set_consent,
+            remember_exchange,
             kv_get,
             kv_set,
             check_updates,

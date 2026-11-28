@@ -62,11 +62,13 @@ pub fn persona(agent: &str) -> Result<&'static str, String> {
     }
 }
 
-/// Keeps the system prompt and the most recent turns that fit a modest budget.
+/// Keeps the system prompt (plus anything the agent remembers) and the most
+/// recent turns that fit a modest budget.
 pub fn build_messages(
     agent: &str,
     history: &[Message],
     max_chars: usize,
+    remembered: Option<&str>,
 ) -> Result<Vec<Message>, String> {
     let mut kept: Vec<Message> = Vec::new();
     let mut used = 0;
@@ -87,7 +89,11 @@ pub fn build_messages(
     if kept.last().map(|m| m.role) != Some(Role::User) {
         return Err("the last message must come from the user".into());
     }
-    let mut out = vec![Message::new(Role::System, persona(agent)?)];
+    let mut system = persona(agent)?.to_string();
+    if let Some(r) = remembered {
+        system.push_str(r);
+    }
+    let mut out = vec![Message::new(Role::System, system)];
     // Some providers require user and assistant turns to alternate.
     for m in kept {
         match out.last_mut() {
@@ -307,9 +313,11 @@ pub fn brain_stop(brain: State<'_, BrainState>) {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum ReplyEvent {
-    /// The brain that is answering (shown under the reply).
+    /// The brain that is answering (shown under the reply) and how many
+    /// remembered items it was given.
     Start {
         brain: String,
+        remembered: usize,
     },
     Token {
         text: String,
@@ -352,6 +360,18 @@ fn reply_blocking(
         .collect();
     let st = status(app, &state, &brain);
     let opts = GenOptions::default();
+    // What the user actually said last (the partner's lines are labelled "[Name]: …").
+    let user_text = history
+        .iter()
+        .rev()
+        .find(|m| m.role == Role::User && !m.content.starts_with('['))
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
+    let remembered: Vec<String> = match (crate::recall::agent_id(agent), state.memory.lock()) {
+        (Some(id), Ok(store)) => crate::recall::recall(&store, id, &user_text),
+        _ => Vec::new(),
+    };
+    let section = crate::recall::memory_section(&remembered);
     let mut send = |t: &str| {
         let _ = on_event.send(ReplyEvent::Token {
             text: t.to_string(),
@@ -359,9 +379,10 @@ fn reply_blocking(
     };
 
     if st.active == LOCAL {
-        let messages = build_messages(agent, &history, 6_000)?;
+        let messages = build_messages(agent, &history, 6_000, section.as_deref())?;
         let _ = on_event.send(ReplyEvent::Start {
             brain: format!("{} · on this Mac", BUNDLED_MODEL.name),
+            remembered: remembered.len(),
         });
         return local_reply(app, &brain, messages, opts, &mut send).map_err(|e| e.to_string());
     }
@@ -375,9 +396,10 @@ fn reply_blocking(
             "{model} is a paid OpenRouter model and paid models are off. Use openrouter/free or a :free model, or allow paid models in the OpenRouter settings."
         ));
     }
-    let messages = build_messages(agent, &history, 24_000)?;
+    let messages = build_messages(agent, &history, 24_000, section.as_deref())?;
     let _ = on_event.send(ReplyEvent::Start {
         brain: format!("{model} · {}", p.name),
+        remembered: remembered.len(),
     });
     cloud::chat(p, &key, &model, &messages, opts, &brain.stop, &mut send).map_err(|e| e.to_string())
 }
@@ -460,7 +482,7 @@ mod tests {
             m(Role::Assistant, "hello"),
             m(Role::User, "how are you?"),
         ];
-        let out = build_messages("Nexa", &h, 10_000).unwrap();
+        let out = build_messages("Nexa", &h, 10_000, None).unwrap();
         assert_eq!(out[0].role, Role::System);
         assert_eq!(out[1], m(Role::User, "hi"));
         assert_eq!(out.last().unwrap(), &m(Role::User, "how are you?"));
@@ -475,7 +497,7 @@ mod tests {
             h.push(m(Role::Assistant, &long));
         }
         h.push(m(Role::User, "latest"));
-        let out = build_messages("Sharee", &h, 1_000).unwrap();
+        let out = build_messages("Sharee", &h, 1_000, None).unwrap();
         assert!(out.len() < 6);
         assert_eq!(out.last().unwrap().content, "latest");
     }
@@ -483,7 +505,7 @@ mod tests {
     #[test]
     fn consecutive_turns_are_merged() {
         let h = vec![m(Role::User, "hi"), m(Role::User, "[Sharee]: hello")];
-        let out = build_messages("Nexa", &h, 1000).unwrap();
+        let out = build_messages("Nexa", &h, 1000, None).unwrap();
         assert_eq!(out.len(), 2);
         assert_eq!(out[1].content, "hi\n\n[Sharee]: hello");
     }
@@ -496,7 +518,20 @@ mod tests {
     }
 
     #[test]
+    fn remembered_items_go_into_the_system_prompt() {
+        let out = build_messages(
+            "Sharee",
+            &[m(Role::User, "hi")],
+            1000,
+            Some("\n\n- likes tea"),
+        )
+        .unwrap();
+        assert!(out[0].content.starts_with("You are Sharee"));
+        assert!(out[0].content.ends_with("- likes tea"));
+    }
+
+    #[test]
     fn history_must_end_with_user() {
-        assert!(build_messages("Sharee", &[m(Role::Assistant, "hi")], 1000).is_err());
+        assert!(build_messages("Sharee", &[m(Role::Assistant, "hi")], 1000, None).is_err());
     }
 }
