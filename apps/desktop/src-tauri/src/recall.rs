@@ -285,6 +285,105 @@ pub fn store_exchange(
     Ok(written)
 }
 
+// ---------------------------------------------------------------------------
+// Consolidation (M23): old conversation snippets become a few short notes.
+
+/// A memory area is consolidated once it holds more snippets than this.
+pub const CONSOLIDATE_AT: usize = 60;
+/// How many of the oldest snippets are folded into notes at a time.
+pub const CONSOLIDATE_BATCH: usize = 30;
+const MAX_NOTES: usize = 5;
+const NOTE_CHARS: usize = 220;
+
+/// The oldest conversation snippets of the first memory area that is due,
+/// never mixing areas and never touching confidential records.
+pub fn consolidation_due(store: &PersistentMemory) -> Option<(Domain, Vec<(MemoryId, String)>)> {
+    let all = store.recent(Reader::User, usize::MAX);
+    for domain in [
+        Domain::Collective,
+        Domain::Private(AgentId::Sharee),
+        Domain::Private(AgentId::Nexa),
+    ] {
+        // `recent` is newest first.
+        let mut snippets: Vec<&Memory> = all
+            .iter()
+            .copied()
+            .filter(|m| {
+                m.domain == domain
+                    && m.kind == Kind::Episodic
+                    && m.source == "conversation"
+                    && m.never_share_with.is_empty()
+            })
+            .collect();
+        if snippets.len() > CONSOLIDATE_AT {
+            snippets.reverse();
+            let oldest = snippets
+                .into_iter()
+                .take(CONSOLIDATE_BATCH)
+                .map(|m| (m.id, m.text.clone()))
+                .collect();
+            return Some((domain, oldest));
+        }
+    }
+    None
+}
+
+/// The instruction for the on-device brain.
+pub fn consolidation_request(lines: &[(MemoryId, String)]) -> (String, String) {
+    let system = "You condense memory notes for a personal assistant. Write at most five short \
+lines, each starting with \"- \". Keep only lasting facts about the user: who they are, people \
+in their life, projects, plans, preferences and decisions. Use only what the notes say; never \
+add, guess or embellish. Drop greetings and small talk. Write in the language of the notes."
+        .to_string();
+    let mut user = String::from("Notes:\n");
+    for (_, t) in lines {
+        user.push_str("- ");
+        user.push_str(&clip(t, LINE_CHARS));
+        user.push('\n');
+    }
+    (system, user)
+}
+
+/// The "- " lines of the brain's answer, cleaned and bounded.
+pub fn parse_notes(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter_map(|l| l.strip_prefix("- ").or_else(|| l.strip_prefix("* ")))
+        .map(|l| clip(l.trim(), NOTE_CHARS))
+        .filter(|l| keywords(l).len() >= 2)
+        .take(MAX_NOTES)
+        .collect()
+}
+
+/// Stores the notes in the same area, then removes the snippets (their
+/// vectors go with them). Nothing is removed unless notes were written.
+pub fn apply_consolidation(
+    store: &mut PersistentMemory,
+    domain: Domain,
+    originals: &[(MemoryId, String)],
+    notes: &[String],
+) -> Result<usize, String> {
+    if notes.is_empty() {
+        return Ok(0);
+    }
+    for n in notes {
+        store
+            .remember(NewMemory {
+                domain,
+                kind: Kind::Reflective,
+                text: n.clone(),
+                source: format!("summary of {} conversation notes", originals.len()),
+                confidence: 0.7,
+                never_share_with: BTreeSet::new(),
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    for (id, _) in originals {
+        store.forget(Reader::User, *id).map_err(|e| e.to_string())?;
+    }
+    Ok(originals.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,6 +560,97 @@ mod tests {
         let leak: Similar = nexa_ids.iter().map(|id| (*id, 0.99)).collect();
         let got = recall(&s, AgentId::Sharee, "party", &leak).join("\n");
         assert!(!got.contains("surprise party"));
+    }
+
+    fn fill(s: &mut PersistentMemory, n: usize, reply_by: Option<AgentId>) {
+        s.put(CONSENT_KEY, "on").unwrap();
+        for i in 0..n {
+            let replies: Vec<(AgentId, String)> = reply_by
+                .map(|a| {
+                    vec![(
+                        a,
+                        format!("Reply number {i} about the garden project plans"),
+                    )]
+                })
+                .unwrap_or_default();
+            store_exchange(s, &format!("note {i} about the garden project"), &replies).unwrap();
+        }
+    }
+
+    #[test]
+    fn consolidation_waits_until_an_area_is_full() {
+        let mut s = store();
+        fill(&mut s, CONSOLIDATE_AT, None);
+        assert!(consolidation_due(&s).is_none());
+        fill(&mut s, 1, None);
+        let (domain, batch) = consolidation_due(&s).unwrap();
+        assert_eq!(domain, Domain::Collective);
+        assert_eq!(batch.len(), CONSOLIDATE_BATCH);
+        assert!(
+            batch[0].1.contains("note 0 "),
+            "oldest first: {}",
+            batch[0].1
+        );
+    }
+
+    #[test]
+    fn consolidation_keeps_areas_apart_and_spares_facts() {
+        let mut s = store();
+        store_exchange(&mut s, "Remember that my garden has tomatoes", &[]).unwrap();
+        fill(&mut s, CONSOLIDATE_AT + 1, Some(AgentId::Nexa));
+        // Shared area first; Nexa's private area is due too but handled separately.
+        let (domain, batch) = consolidation_due(&s).unwrap();
+        assert_eq!(domain, Domain::Collective);
+        assert!(batch.iter().all(|(_, t)| t.starts_with("The user said")));
+        let notes = vec!["The user is planning a garden project.".to_string()];
+        assert_eq!(
+            apply_consolidation(&mut s, domain, &batch, &notes).unwrap(),
+            CONSOLIDATE_BATCH
+        );
+        let (domain, batch) = consolidation_due(&s).unwrap();
+        assert_eq!(domain, Domain::Private(AgentId::Nexa));
+        apply_consolidation(
+            &mut s,
+            domain,
+            &batch,
+            &["Nexa suggested garden plans.".into()],
+        )
+        .unwrap();
+        assert!(consolidation_due(&s).is_none());
+        // The summary of Nexa's notes stays private to Nexa.
+        assert!(recall(
+            &s,
+            AgentId::Sharee,
+            "garden plans suggested",
+            &Similar::new()
+        )
+        .iter()
+        .all(|l| !l.contains("Nexa suggested")));
+        // The explicit fact is untouched.
+        assert!(
+            recall(&s, AgentId::Sharee, "garden tomatoes", &Similar::new())
+                .contains(&"my garden has tomatoes".to_string())
+        );
+    }
+
+    #[test]
+    fn nothing_is_removed_without_notes() {
+        let mut s = store();
+        fill(&mut s, CONSOLIDATE_AT + 1, None);
+        let before = s.len();
+        let (domain, batch) = consolidation_due(&s).unwrap();
+        assert_eq!(apply_consolidation(&mut s, domain, &batch, &[]).unwrap(), 0);
+        assert_eq!(s.len(), before);
+    }
+
+    #[test]
+    fn notes_are_parsed_and_bounded() {
+        let text = "Here you go:\n- The user lives in Islamabad.\n- ok\n* Prefers green tea in the morning.\n- a\n- b c d\n- e f g\n- h i j\n- k l m";
+        let notes = parse_notes(text);
+        assert_eq!(notes[0], "The user lives in Islamabad.");
+        assert_eq!(notes[1], "Prefers green tea in the morning.");
+        assert!(notes.len() <= 5);
+        assert!(parse_notes("no bullet lines at all").is_empty());
     }
 
     #[test]

@@ -95,6 +95,8 @@ export interface LocalBrain {
   supported: boolean;
   loaded: boolean;
   contextTokens: number | null;
+  /** The embedding model for memory recall by meaning is in this build. */
+  embeddings: boolean;
 }
 
 export interface BrainProvider {
@@ -114,6 +116,8 @@ export interface BrainStatus {
   ready: boolean;
   local: LocalBrain;
   providers: BrainProvider[];
+  /** If the chosen brain fails, also try other connected cloud providers. */
+  fallbackAny: boolean;
 }
 
 export type ChatRole = "user" | "assistant";
@@ -121,7 +125,9 @@ export interface ChatTurn {
   role: ChatRole;
   content: string;
 }
-export type ReplyEvent = { kind: "start"; brain: string; remembered: number } | { kind: "token"; text: string };
+export type ReplyEvent =
+  | { kind: "start"; brain: string; remembered: number; note: string | null }
+  | { kind: "token"; text: string };
 
 export const inDesktop = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -153,6 +159,8 @@ export const ipc = {
   /** Keeps "remember that …" facts, and the exchange itself when allowed. */
   rememberExchange: (userText: string, replies: { agent: "Sharee" | "Nexa"; text: string }[]) =>
     call<number>("remember_exchange", { userText, replies }),
+  /** Folds old conversation notes into a few short notes, on this Mac. */
+  memoryConsolidate: () => call<number>("memory_consolidate"),
   kvGet: (key: string) => call<string | null>("kv_get", { key }),
   kvSet: (key: string, value: string) => call<void>("kv_set", { key, value }),
   checkUpdates: () => call<UpdateStatus>("check_updates"),
@@ -169,6 +177,7 @@ export const ipc = {
   brainSaveKey: (id: string, key: string) => call<BrainStatus>("brain_save_key", { id, key }),
   brainClearKey: (id: string) => call<BrainStatus>("brain_clear_key", { id }),
   brainStop: () => call<void>("brain_stop"),
+  brainSetFallback: (any: boolean) => call<BrainStatus>("brain_set_fallback", { any }),
   /** Streams one reply from Sharee or Nexa; resolves with the full text. */
   agentReply: (agent: "Sharee" | "Nexa", history: ChatTurn[], onEvent: (e: ReplyEvent) => void) => {
     const channel = new Channel<ReplyEvent>();
