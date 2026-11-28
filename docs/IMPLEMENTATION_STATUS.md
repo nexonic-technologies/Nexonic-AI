@@ -31,7 +31,7 @@ Classification: **Implemented** · **Tested** · **Experimental** · **Blocked**
 | OpenRouter router (catalogue, Keychain key, free-only default, 429 cooldown fallback, test completion) | Tested | `crates/model-router/src/openrouter.rs`, `src-tauri/src/keychain.rs`; opened from Intelligence → OpenRouter |
 | Character art | Interim | owner concept art; real-time digital humans in M15 |
 | Agents, model routing, voice, awareness, automation | Pending | Phases C–E |
-| Packaging and releases | Pending | M47/M48 |
+| Packaging and releases | Implemented (preview) | pushing a `v*` tag builds the DMG with the brain inside and publishes a GitHub release (`Desktop` → Publish release); ad-hoc signed, not notarized; first release v0.1.0 |
 
 ## Next actionable task
 
