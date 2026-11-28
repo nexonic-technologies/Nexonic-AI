@@ -222,7 +222,46 @@ impl PersistentMemory {
         self.db
             .execute("DELETE FROM memories WHERE id = ?1", params![id.0 as i64])
             .map_err(err)?;
+        // Derived data goes with the record: its embedding can reveal content.
+        self.db
+            .execute("DELETE FROM kv WHERE k = ?1", params![vector_key(id)])
+            .map_err(err)?;
         Ok(())
+    }
+
+    /// Stores the embedding of a record, encrypted like everything else.
+    pub fn put_vector(&mut self, id: MemoryId, v: &[f32]) -> Result<(), MemoryError> {
+        let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
+        let key = vector_key(id);
+        let blob = self.seal(&bytes, format!("kv:{key}").as_bytes())?;
+        self.db
+            .execute(
+                "INSERT INTO kv (k, v) VALUES (?1, ?2) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+                params![key, blob],
+            )
+            .map_err(err)?;
+        Ok(())
+    }
+
+    /// The stored embedding of a record, if any.
+    pub fn vector(&self, id: MemoryId) -> Result<Option<Vec<f32>>, MemoryError> {
+        let key = vector_key(id);
+        let blob: Option<Vec<u8>> = self
+            .db
+            .query_row("SELECT v FROM kv WHERE k = ?1", params![key], |r| r.get(0))
+            .optional()
+            .map_err(err)?;
+        let Some(b) = blob else { return Ok(None) };
+        let plain = self.open_blob(&b, format!("kv:{key}").as_bytes())?;
+        if plain.len() % 4 != 0 {
+            return Err(MemoryError::Storage("corrupt vector".into()));
+        }
+        Ok(Some(
+            plain
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect(),
+        ))
     }
 
     pub fn get(&self, reader: Reader, id: MemoryId) -> Result<&Memory, MemoryError> {
@@ -270,6 +309,10 @@ impl PersistentMemory {
             }
         }
     }
+}
+
+fn vector_key(id: MemoryId) -> String {
+    format!("vec:v1:{}", id.0)
 }
 
 fn domain_str(d: Domain) -> &'static str {
@@ -421,6 +464,24 @@ mod tests {
                 .unwrap();
         assert_eq!(n, 0);
         assert!(m.is_empty());
+    }
+
+    #[test]
+    fn vectors_round_trip_and_go_with_the_record() {
+        let key = generate_key();
+        let mut m = PersistentMemory::open_in_memory(&key).unwrap();
+        let id = m
+            .remember(new(Domain::Private(AgentId::Nexa), "likes green tea", &[]))
+            .unwrap();
+        assert_eq!(m.vector(id).unwrap(), None);
+        m.put_vector(id, &[0.25, -1.5, 3.0]).unwrap();
+        assert_eq!(m.vector(id).unwrap(), Some(vec![0.25, -1.5, 3.0]));
+        m.forget(Reader::User, id).unwrap();
+        assert_eq!(m.vector(id).unwrap(), None);
+        let n: i64 =
+            m.db.query_row("SELECT COUNT(*) FROM kv", [], |r| r.get(0))
+                .unwrap();
+        assert_eq!(n, 0, "no vector left behind");
     }
 
     #[test]

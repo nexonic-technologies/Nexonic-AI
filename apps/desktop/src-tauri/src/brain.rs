@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use nexonic_model_router::{
-    cloud, provider, GenOptions, Message, Role, RouterError, StopFlag, BUNDLED_MODEL, PROVIDERS,
+    cloud, provider, GenOptions, Message, Role, RouterError, StopFlag, BUNDLED_MODEL, EMBED_MODEL,
+    PROVIDERS,
 };
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
@@ -25,6 +26,10 @@ pub struct BrainState {
     stop: Arc<StopFlag>,
     #[cfg(target_os = "macos")]
     engine: Mutex<Option<nexonic_model_router::local::LocalEngine>>,
+    /// The embedding model for recall by meaning; an error is kept so a
+    /// broken model is not reloaded on every reply.
+    #[cfg(target_os = "macos")]
+    embedder: Mutex<Option<Result<nexonic_model_router::embed::Embedder, String>>>,
     /// Serialises replies so Sharee and Nexa never talk over each other.
     busy: Mutex<()>,
 }
@@ -35,6 +40,8 @@ impl Default for BrainState {
             stop: Arc::new(StopFlag::default()),
             #[cfg(target_os = "macos")]
             engine: Mutex::new(None),
+            #[cfg(target_os = "macos")]
+            embedder: Mutex::new(None),
             busy: Mutex::new(()),
         }
     }
@@ -125,6 +132,94 @@ fn find_model(app: &AppHandle) -> Option<PathBuf> {
     model_candidates(app).into_iter().find(|p| p.is_file())
 }
 
+fn find_embed_model(app: &AppHandle) -> Option<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(p) = std::env::var("NEXONIC_EMBED_MODEL") {
+        paths.push(PathBuf::from(p));
+    }
+    if let Ok(dir) = app.path().resource_dir() {
+        paths.push(dir.join("models").join(EMBED_MODEL.file));
+    }
+    if let Ok(dir) = app.path().app_data_dir() {
+        paths.push(dir.join("models").join(EMBED_MODEL.file));
+    }
+    paths.into_iter().find(|p| p.is_file())
+}
+
+/// Closeness in meaning between the user's message and every memory `agent`
+/// may read. Memories without a vector are embedded once and the vector is
+/// stored encrypted next to them. Empty when the model is unavailable.
+#[cfg(target_os = "macos")]
+fn similar(
+    app: &AppHandle,
+    state: &AppState,
+    brain: &BrainState,
+    agent: nexonic_memory_engine::AgentId,
+    query: &str,
+) -> crate::recall::Similar {
+    use nexonic_model_router::embed::{as_passage, as_query, cosine, Embedder};
+    let mut out = crate::recall::Similar::new();
+    if query.trim().is_empty() {
+        return out;
+    }
+    let Some(path) = find_embed_model(app) else {
+        return out;
+    };
+    let Ok(mut slot) = brain.embedder.lock() else {
+        return out;
+    };
+    if slot.is_none() {
+        *slot = Some(Embedder::start(&path).map_err(|e| e.to_string()));
+    }
+    let Some(Ok(emb)) = slot.as_ref() else {
+        return out;
+    };
+    let mut have = Vec::new();
+    let mut missing = Vec::new();
+    {
+        let Ok(m) = state.memory.lock() else {
+            return out;
+        };
+        for (id, text) in crate::recall::readable(&m, agent, 400) {
+            match m.vector(id) {
+                Ok(Some(v)) if v.len() == emb.dims() => have.push((id, v)),
+                _ => missing.push((id, text)),
+            }
+        }
+    }
+    for chunk in missing.chunks(32) {
+        let texts: Vec<String> = chunk.iter().map(|(_, t)| as_passage(t)).collect();
+        let Ok(vectors) = emb.embed(&texts) else {
+            break;
+        };
+        if let Ok(mut m) = state.memory.lock() {
+            for ((id, _), v) in chunk.iter().zip(vectors) {
+                let _ = m.put_vector(*id, &v);
+                have.push((*id, v));
+            }
+        }
+    }
+    let Ok(mut q) = emb.embed(&[as_query(query)]) else {
+        return out;
+    };
+    let q = q.remove(0);
+    for (id, v) in have {
+        out.insert(id, cosine(&q, &v));
+    }
+    out
+}
+
+#[cfg(not(target_os = "macos"))]
+fn similar(
+    _app: &AppHandle,
+    _state: &AppState,
+    _brain: &BrainState,
+    _agent: nexonic_memory_engine::AgentId,
+    _query: &str,
+) -> crate::recall::Similar {
+    crate::recall::Similar::new()
+}
+
 fn kv(state: &AppState, key: &str) -> Option<String> {
     state.memory.lock().ok()?.get_value(key).ok().flatten()
 }
@@ -153,6 +248,8 @@ pub struct LocalStatus {
     pub supported: bool,
     pub loaded: bool,
     pub context_tokens: Option<u32>,
+    /// The embedding model for memory recall by meaning is in this build.
+    pub embeddings: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -177,6 +274,9 @@ pub struct BrainStatus {
     pub ready: bool,
     pub local: LocalStatus,
     pub providers: Vec<ProviderView>,
+    /// If the chosen brain fails, also try other connected cloud providers
+    /// (the on-device brain is always tried first).
+    pub fallback_any: bool,
 }
 
 fn status(app: &AppHandle, state: &AppState, brain: &BrainState) -> BrainStatus {
@@ -228,8 +328,10 @@ fn status(app: &AppHandle, state: &AppState, brain: &BrainState) -> BrainStatus 
             supported,
             loaded,
             context_tokens: ctx,
+            embeddings: supported && find_embed_model(app).is_some(),
         },
         providers,
+        fallback_any: fallback_any(state),
     }
 }
 
@@ -318,6 +420,8 @@ pub enum ReplyEvent {
     Start {
         brain: String,
         remembered: usize,
+        /// Set when an earlier brain failed and this one answers instead.
+        note: Option<String>,
     },
     Token {
         text: String,
@@ -367,41 +471,227 @@ fn reply_blocking(
         .find(|m| m.role == Role::User && !m.content.starts_with('['))
         .map(|m| m.content.clone())
         .unwrap_or_default();
-    let remembered: Vec<String> = match (crate::recall::agent_id(agent), state.memory.lock()) {
-        (Some(id), Ok(store)) => crate::recall::recall(&store, id, &user_text),
-        _ => Vec::new(),
+    let remembered: Vec<String> = match crate::recall::agent_id(agent) {
+        Some(id) => {
+            let close = similar(app, &state, &brain, id, &user_text);
+            state
+                .memory
+                .lock()
+                .map(|store| crate::recall::recall(&store, id, &user_text, &close))
+                .unwrap_or_default()
+        }
+        None => Vec::new(),
     };
     let section = crate::recall::memory_section(&remembered);
-    let mut send = |t: &str| {
-        let _ = on_event.send(ReplyEvent::Token {
-            text: t.to_string(),
-        });
-    };
 
-    if st.active == LOCAL {
-        let messages = build_messages(agent, &history, 6_000, section.as_deref())?;
+    let local_ready = st.local.installed && st.local.supported;
+    let keyed: Vec<&str> = st
+        .providers
+        .iter()
+        .filter(|p| p.has_key)
+        .map(|p| p.id)
+        .collect();
+    let order = fallback_order(&st.active, local_ready, &keyed, fallback_any(&state));
+    let mut failures: Vec<String> = Vec::new();
+    for (i, id) in order.iter().enumerate() {
+        let note = (i > 0).then(|| format!("{} · answered instead", failures.join(" · ")));
+        let streamed = std::cell::Cell::new(false);
+        let mut send = |t: &str| {
+            streamed.set(true);
+            let _ = on_event.send(ReplyEvent::Token {
+                text: t.to_string(),
+            });
+        };
+        let attempt = try_brain(
+            app,
+            &state,
+            &brain,
+            id,
+            agent,
+            &history,
+            section.as_deref(),
+            remembered.len(),
+            note,
+            opts,
+            on_event,
+            &mut send,
+        );
+        match attempt {
+            Ok(text) => return Ok(text),
+            // Stopped by the user, or failed part-way through a reply: never
+            // start the reply again with another brain.
+            Err(e) if e.cancelled || streamed.get() => return Err(e.message),
+            Err(e) if i + 1 == order.len() => {
+                failures.push(e.message);
+                return Err(failures.join(" · "));
+            }
+            Err(e) => failures.push(e.message),
+        }
+    }
+    Err("no brain is available".into())
+}
+
+/// kv key: "local" (default) falls back only to the on-device brain; "any"
+/// also tries the user's other connected cloud providers.
+const FALLBACK_KEY: &str = "brain.fallback";
+
+fn fallback_any(state: &AppState) -> bool {
+    kv(state, FALLBACK_KEY).as_deref() == Some("any")
+}
+
+/// The brains to try, in order. The chosen one first; then the on-device
+/// brain (nothing leaves the Mac); then, only if the user allowed it, their
+/// other connected cloud providers. A conversation never goes to a cloud
+/// provider the user has not connected.
+pub fn fallback_order(
+    active: &str,
+    local_ready: bool,
+    keyed: &[&str],
+    allow_cloud: bool,
+) -> Vec<String> {
+    let mut out = vec![active.to_string()];
+    if active != LOCAL && local_ready {
+        out.push(LOCAL.into());
+    }
+    if allow_cloud {
+        for id in keyed {
+            if *id != active {
+                out.push((*id).to_string());
+            }
+        }
+    }
+    out
+}
+
+struct BrainError {
+    message: String,
+    cancelled: bool,
+}
+
+impl From<RouterError> for BrainError {
+    fn from(e: RouterError) -> Self {
+        Self {
+            cancelled: matches!(e, RouterError::Cancelled),
+            message: e.to_string(),
+        }
+    }
+}
+
+impl From<String> for BrainError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            cancelled: false,
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn try_brain(
+    app: &AppHandle,
+    state: &AppState,
+    brain: &BrainState,
+    id: &str,
+    agent: &str,
+    history: &[Message],
+    section: Option<&str>,
+    remembered: usize,
+    note: Option<String>,
+    opts: GenOptions,
+    on_event: &Channel<ReplyEvent>,
+    send: &mut dyn FnMut(&str),
+) -> Result<String, BrainError> {
+    if id == LOCAL {
+        let messages = build_messages(agent, history, 6_000, section)?;
         let _ = on_event.send(ReplyEvent::Start {
             brain: format!("{} · on this Mac", BUNDLED_MODEL.name),
-            remembered: remembered.len(),
+            remembered,
+            note,
         });
-        return local_reply(app, &brain, messages, opts, &mut send).map_err(|e| e.to_string());
+        return Ok(local_reply(app, brain, messages, opts, send)?);
     }
-
-    let p = provider(&st.active).ok_or_else(|| format!("unknown provider: {}", st.active))?;
+    let p = provider(id).ok_or_else(|| format!("unknown provider: {id}"))?;
     let key = keychain::load_provider_key(p.id)?
         .ok_or_else(|| RouterError::MissingKey(p.name.to_string()).to_string())?;
-    let model = model_for(&state, p.id);
-    if p.id == "openrouter" && !openrouter_allows(&state, &model) {
+    let model = model_for(state, p.id);
+    if p.id == "openrouter" && !openrouter_allows(state, &model) {
         return Err(format!(
             "{model} is a paid OpenRouter model and paid models are off. Use openrouter/free or a :free model, or allow paid models in the OpenRouter settings."
-        ));
+        )
+        .into());
     }
-    let messages = build_messages(agent, &history, 24_000, section.as_deref())?;
+    let messages = build_messages(agent, history, 24_000, section)?;
     let _ = on_event.send(ReplyEvent::Start {
         brain: format!("{model} · {}", p.name),
-        remembered: remembered.len(),
+        remembered,
+        note,
     });
-    cloud::chat(p, &key, &model, &messages, opts, &brain.stop, &mut send).map_err(|e| e.to_string())
+    Ok(cloud::chat(
+        p,
+        &key,
+        &model,
+        &messages,
+        opts,
+        &brain.stop,
+        send,
+    )?)
+}
+
+/// Folds old conversation snippets into a few notes with the brain on this
+/// Mac (memories never leave the Mac for this). Runs only when an area is
+/// full, the on-device brain is available and no reply is in progress.
+/// Returns how many snippets were folded.
+#[tauri::command]
+pub async fn memory_consolidate(app: AppHandle) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || consolidate_blocking(&app))
+        .await
+        .map_err(|e| format!("consolidation worker failed: {e}"))?
+}
+
+fn consolidate_blocking(app: &AppHandle) -> Result<usize, String> {
+    let state = app.state::<AppState>();
+    let brain = app.state::<BrainState>();
+    let due = {
+        let m = state.memory.lock().map_err(|e| e.to_string())?;
+        crate::recall::consolidation_due(&m)
+    };
+    let Some((domain, batch)) = due else {
+        return Ok(0);
+    };
+    let st = status(app, &state, &brain);
+    if !(st.local.installed && st.local.supported) {
+        return Ok(0);
+    }
+    // Never delay a reply: skip if one is running.
+    let Ok(_turn) = brain.busy.try_lock() else {
+        return Ok(0);
+    };
+    brain.stop.reset();
+    let (system, user) = crate::recall::consolidation_request(&batch);
+    let messages = vec![
+        Message::new(Role::System, system),
+        Message::new(Role::User, user),
+    ];
+    let opts = GenOptions {
+        max_tokens: 320,
+        temperature: 0.2,
+    };
+    let text =
+        local_reply(app, &brain, messages, opts, &mut |_: &str| {}).map_err(|e| e.to_string())?;
+    let notes = crate::recall::parse_notes(&text);
+    let mut m = state.memory.lock().map_err(|e| e.to_string())?;
+    crate::recall::apply_consolidation(&mut m, domain, &batch, &notes)
+}
+
+#[tauri::command]
+pub fn brain_set_fallback(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    brain: State<'_, BrainState>,
+    any: bool,
+) -> Result<BrainStatus, String> {
+    set_kv(&state, FALLBACK_KEY, if any { "any" } else { "local" })?;
+    Ok(status(&app, &state, &brain))
 }
 
 /// Keeps the OpenRouter cost guard: unless paid models are allowed, only free ones are used.
@@ -528,6 +818,34 @@ mod tests {
         .unwrap();
         assert!(out[0].content.starts_with("You are Sharee"));
         assert!(out[0].content.ends_with("- likes tea"));
+    }
+
+    #[test]
+    fn fallback_prefers_the_mac_and_respects_consent() {
+        // Cloud fails → the on-device brain; other clouds only when allowed.
+        assert_eq!(
+            fallback_order("openai", true, &["openai", "openrouter"], false),
+            vec!["openai", "local"]
+        );
+        assert_eq!(
+            fallback_order("openai", true, &["openai", "openrouter"], true),
+            vec!["openai", "local", "openrouter"]
+        );
+        // No model on this Mac and no consent: nothing else is tried.
+        assert_eq!(
+            fallback_order("openai", false, &["openai", "deepseek"], false),
+            vec!["openai"]
+        );
+        // The on-device brain fails → cloud only with consent and a key.
+        assert_eq!(
+            fallback_order("local", true, &["openrouter"], false),
+            vec!["local"]
+        );
+        assert_eq!(
+            fallback_order("local", true, &["openrouter"], true),
+            vec!["local", "openrouter"]
+        );
+        assert_eq!(fallback_order("local", true, &[], true), vec!["local"]);
     }
 
     #[test]

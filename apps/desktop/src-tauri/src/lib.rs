@@ -719,6 +719,8 @@ pub fn run() {
             brain::brain_save_key,
             brain::brain_clear_key,
             brain::brain_stop,
+            brain::brain_set_fallback,
+            brain::memory_consolidate,
             brain::agent_reply
         ])
         .run(tauri::generate_context!())

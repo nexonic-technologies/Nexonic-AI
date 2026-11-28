@@ -15,6 +15,8 @@ export interface Turn {
   brain?: string;
   /** How many remembered items the agent was given for this reply. */
   remembered?: number;
+  /** Set when the chosen brain failed and another one answered. */
+  note?: string;
   error?: string;
   streaming?: boolean;
 }
@@ -72,7 +74,7 @@ export function useConversation(onSaved?: (written: number) => void) {
         let acc = "";
         try {
           const full = await ipc.agentReply(agent, history, (e) => {
-            if (e.kind === "start") patch(id, { brain: e.brain, remembered: e.remembered });
+            if (e.kind === "start") patch(id, { brain: e.brain, remembered: e.remembered, note: e.note ?? undefined });
             else {
               acc += e.text;
               setWaiting(null);
@@ -97,7 +99,11 @@ export function useConversation(onSaved?: (written: number) => void) {
       // Explicit "remember that …" facts are kept always; the exchange only
       // when the user turned on "Remember our conversations".
       const written = await ipc.rememberExchange(msg, replies).catch(() => 0);
-      if (written) onSaved?.(written);
+      if (written) {
+        onSaved?.(written);
+        // In the background: tidy old notes once an area is full (on this Mac).
+        void ipc.memoryConsolidate().then((n) => { if (n) onSaved?.(n); }).catch(() => undefined);
+      }
     } finally {
       busy.current = false;
     }

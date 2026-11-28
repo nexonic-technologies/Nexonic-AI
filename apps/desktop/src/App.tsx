@@ -781,6 +781,7 @@ function CollabPanel({
               <b>{t.who}</b>
               {t.text ? <p>{t.text}{t.streaming && <span className="caret" aria-hidden="true" />}</p> : t.streaming ? <p className="muted">Thinking…</p> : null}
               {t.error && <p className="chat-error">{t.error}</p>}
+              {t.note && !t.streaming && <small className="chat-note" title={t.note}>The chosen brain was unavailable; this one answered instead.</small>}
               {t.brain && !t.streaming && <small>{t.brain}{t.remembered ? ` · remembered ${t.remembered} ${t.remembered === 1 ? "thing" : "things"}` : ""}</small>}
             </li>
           ))}
@@ -840,6 +841,7 @@ function IntelligenceModal({
             <b>On this Mac · {local?.name ?? "Qwen3.5 2B"}</b>
             <small>Offline and private: nothing leaves your Mac. {local ? `${fmtGB(local.sizeBytes)} · ${local.licence}` : ""}{sys ? ` · ${formatBytes(sys.memoryBytes)} memory` : ""}</small>
             <small className={local?.installed && local.supported ? "ok" : "warn"}>{localNote}</small>
+            {local?.embeddings && <small className="ok">Memory recall by meaning: on this Mac ({"multilingual-E5-small"})</small>}
           </div>
         </label>
 
@@ -868,6 +870,15 @@ function IntelligenceModal({
             </div>
           </div>
         ))}
+        <h4 className="intel-h">If the chosen brain fails</h4>
+        <label className="brain-card fallback">
+          <input type="checkbox" checked={!!status?.fallbackAny} disabled={!status}
+            onChange={(e) => run(ipc.brainSetFallback(e.target.checked))} />
+          <div>
+            <b>Also try my other connected cloud providers</b>
+            <small>The brain on this Mac is always tried first (nothing leaves your Mac). Turn this on to also try the other providers you saved a key for; your conversation is then sent to that provider.</small>
+          </div>
+        </label>
         {error && <p className="chat-error" role="alert">{error}</p>}
         <p className="muted intel-foot">Keys are stored in your macOS Keychain and sent only to the provider you choose. Cloud replies send your conversation to that provider.</p>
       </div>

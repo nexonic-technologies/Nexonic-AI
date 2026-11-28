@@ -19,7 +19,7 @@ const BATCH: usize = 512;
 /// llama.cpp can be initialised once per process; every engine shares it.
 static BACKEND: OnceLock<Result<LlamaBackend, String>> = OnceLock::new();
 
-fn backend() -> Result<&'static LlamaBackend, RouterError> {
+pub(crate) fn backend() -> Result<&'static LlamaBackend, RouterError> {
     BACKEND
         .get_or_init(|| {
             LlamaBackend::init()
