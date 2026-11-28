@@ -2,7 +2,7 @@
 
 | Item | Type | Impact | Needed to unblock |
 |---|---|---|---|
-| Test builds only | Status | CI produces ad-hoc-signed arm64 .app/.dmg artifacts; no public release yet | Agents online + Developer ID |
+| Preview releases only | Status | GitHub releases carry an ad-hoc-signed arm64 DMG; macOS asks the user to approve the first launch (Privacy & Security → Open Anyway) | Developer ID signing and notarization |
 | Characters not yet live in the app | Status | Talking clips render on Apple Silicon (probe); the real-time sidecar that streams them into the app is next | M15 sidecar + bundled runtime |
 | Live portraits are pre-rendered | Status | Gaze, blinks and moods play from a LivePortrait frame atlas (99 frames per character); in-between head angles cross-fade. Lip sync while speaking needs the real-time sidecar | M15 sidecar |
 | Source portraits are low resolution | Status | Cropped from the concept image (~330 px faces); fine for LivePortrait, sharper sources will improve quality | Higher-resolution renders of Sharee and Nexa |
