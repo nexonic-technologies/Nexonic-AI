@@ -48,6 +48,7 @@ fi
 
 echo "== convert"
 mkdir -p "$(dirname "$OUT")"
-"$WORK/venv/bin/python" "$WORK/llama.cpp/convert_hf_to_gguf.py" "$SRC" --outtype q8_0 --outfile "$OUT"
+# convert_e5.py: BERT tensors + the converter's own XLM-R tokenizer routine.
+"$WORK/venv/bin/python" "$(dirname "$0")/convert_e5.py" "$WORK/llama.cpp" "$SRC" --outtype q8_0 --outfile "$OUT"
 ls -l "$OUT"
 shasum -a 256 "$OUT"
