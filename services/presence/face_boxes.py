@@ -3,9 +3,10 @@ Sharee and Nexa on the same eye line at the same size.
 
     python face_boxes.py apps/desktop/src/assets/clips
 
-Reads <dir>/<name>/idle.mp4 (colour | alpha packed side by side) and writes
-<dir>/manifest.json with {"faces": {name: {cx, cy, w}}} in 0-1 units of the
-colour half. The head is measured from the alpha matte of the first frame:
+Reads every <dir>/<name>/<clip>.mp4 (colour | alpha packed side by side) and
+writes <dir>/manifest.json with {"faces": {name: box of idle}, "clips":
+{name: {clip: box}}}, each box {cx, cy, w} in 0-1 units of the colour half, so
+the app puts every clip's face on exactly the same spot. The head is measured from the alpha matte of the first frame:
 its top, and its width just above the ears, so it needs no face detector.
 """
 
@@ -41,9 +42,11 @@ def face_box(clip: Path) -> dict:
 
 def main() -> None:
     root = Path(sys.argv[1])
-    faces = {d.name: face_box(d / "idle.mp4") for d in sorted(root.iterdir()) if (d / "idle.mp4").exists()}
-    (root / "manifest.json").write_text(json.dumps({"faces": faces}, indent=2) + "\n")
-    print(json.dumps(faces))
+    chars = [d for d in sorted(root.iterdir()) if (d / "idle.mp4").exists()]
+    clips = {d.name: {f.stem: face_box(f) for f in sorted(d.glob("*.mp4"))} for d in chars}
+    faces = {name: boxes["idle"] for name, boxes in clips.items()}
+    (root / "manifest.json").write_text(json.dumps({"faces": faces, "clips": clips}, indent=2) + "\n")
+    print(json.dumps(clips))
 
 
 if __name__ == "__main__":
