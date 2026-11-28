@@ -33,11 +33,11 @@ Status: ✅ done · 🔶 in progress · ⛔ blocked · ⬜ pending
 | M16 | Independent cognitive agent runtimes | 🔶 each agent recalls only its own and shared memory |
 | M17 | OpenRouter and BYOK providers | ✅ OpenRouter router + OpenAI, Anthropic, DeepSeek own keys |
 | M18 | Embedded local inference | ✅ Qwen3.5 2B inside the app (llama.cpp, Metal) |
-| M19 | Multi-model routing | ⬜ |
-| M20 | Independent cognitive memory engines | 🔶 isolation, encrypted persistence, conversation memory with consent |
+| M19 | Multi-model routing | 🔶 fallback: chosen brain → on-device brain → other connected providers (opt-in) |
+| M20 | Independent cognitive memory engines | 🔶 isolation, encrypted persistence, conversation memory with consent, recall by meaning on the Mac |
 | M21 | Collective Intelligence and agent communication | ⬜ |
 | M22 | Confidentiality and information-flow enforcement | 🔶 storage layer done |
-| M23 | Memory consolidation | ⬜ |
+| M23 | Memory consolidation | 🔶 old notes folded into short notes by the on-device brain |
 
 ## Phase D — Multimodal awareness and voice (M24–M31) — ⬜
 Camera, microphone, screen and app awareness, file/website context, speech recognition,
