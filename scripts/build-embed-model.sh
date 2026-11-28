@@ -41,9 +41,12 @@ REQ="$WORK/llama.cpp/requirements/requirements-convert_hf_to_gguf.txt"
 if command -v uv >/dev/null; then
   uv venv -q --python 3.12 "$WORK/venv"
   (cd "$WORK/llama.cpp/requirements" && uv pip install -q --python "$WORK/venv/bin/python" -r "$REQ")
+  # sentencepiece's model proto needs protobuf.runtime_version (protobuf 5.26+).
+  uv pip install -q --python "$WORK/venv/bin/python" "protobuf>=5.26,<7"
 else
   python3.12 -m venv "$WORK/venv"
   "$WORK/venv/bin/pip" install -q -r "$REQ"
+  "$WORK/venv/bin/pip" install -q "protobuf>=5.26,<7"
 fi
 
 echo "== convert"
