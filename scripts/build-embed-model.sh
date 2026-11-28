@@ -5,7 +5,7 @@
 #
 #   scripts/build-embed-model.sh <out.gguf>
 #
-# Needs: curl, git, python3, and GH_TOKEN (or gh logged in) to look up the
+# Needs: curl, git, uv (or python3.12), and GH_TOKEN (or gh logged in) to look up the
 # llama.cpp submodule commit. Everything downloaded is pinned or verified.
 set -euo pipefail
 
@@ -36,10 +36,15 @@ git init -q "$WORK/llama.cpp"
 git -C "$WORK/llama.cpp" fetch -q --depth 1 https://github.com/ggml-org/llama.cpp "$LLAMA_CPP_COMMIT"
 git -C "$WORK/llama.cpp" checkout -q FETCH_HEAD
 
-echo "== converter dependencies"
-python3 -m venv "$WORK/venv"
-"$WORK/venv/bin/pip" install -q --upgrade pip
-"$WORK/venv/bin/pip" install -q -r "$WORK/llama.cpp/requirements/requirements-convert_hf_to_gguf.txt"
+echo "== converter dependencies (Python 3.12, the converter's pinned torch/numpy need it)"
+REQ="$WORK/llama.cpp/requirements/requirements-convert_hf_to_gguf.txt"
+if command -v uv >/dev/null; then
+  uv venv -q --python 3.12 "$WORK/venv"
+  (cd "$WORK/llama.cpp/requirements" && uv pip install -q --python "$WORK/venv/bin/python" -r "$REQ")
+else
+  python3.12 -m venv "$WORK/venv"
+  "$WORK/venv/bin/pip" install -q -r "$REQ"
+fi
 
 echo "== convert"
 mkdir -p "$(dirname "$OUT")"
