@@ -47,6 +47,8 @@ pub const EMBED_MODEL: EmbedModel = EmbedModel {
     repo: "intfloat/multilingual-e5-small",
     revision: "fd1525a9fd15316a2d503bf26ab031a61d056e98",
     weights_sha256: "1a55775f53449dac10a2bcbc312469fac40b96d53198c407081a831f81c98477",
+    bytes: 132_440_512,
+    sha256: "64e9d486b70249537ee391c10bed279e975284006fd574bb0aadd01392cf945f",
 };
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -58,6 +60,9 @@ pub struct EmbedModel {
     pub revision: &'static str,
     /// SHA-256 of the official model.safetensors at `revision`.
     pub weights_sha256: &'static str,
+    /// Size and SHA-256 of the GGUF the build produces (checked in CI).
+    pub bytes: u64,
+    pub sha256: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]

@@ -19,16 +19,33 @@ use nexonic_memory_engine::{AgentId, Domain, Kind, Memory, MemoryId, NewMemory, 
 /// Empty when the model is not available; recall then uses words only.
 pub type Similar = HashMap<MemoryId, f32>;
 
-/// Below this cosine a memory is not considered related (multilingual-E5
-/// scores unrelated text around 0.75–0.80).
-pub const SEM_MIN: f32 = 0.82;
+/// multilingual-E5 gives every pair a fairly high cosine (unrelated text
+/// ~0.70–0.73, related ~0.76–0.82 in the CI test), so "related" is decided
+/// relative to the rest: a memory must stand out from the typical score by
+/// SEM_MARGIN and also clear SEM_FLOOR. When nothing stands out, nothing is
+/// recalled by meaning (better than recalling the wrong thing).
+pub const SEM_FLOOR: f32 = 0.74;
+pub const SEM_MARGIN: f32 = 0.03;
+/// Typical score for unrelated text, used while there are too few memories
+/// to measure it.
+const SEM_BASELINE_FEW: f32 = 0.72;
+
+/// The typical (median) similarity, or SEM_BASELINE_FEW with under 5 memories.
+pub fn sem_baseline(similar: &Similar) -> f32 {
+    if similar.len() < 5 {
+        return SEM_BASELINE_FEW;
+    }
+    let mut v: Vec<f32> = similar.values().copied().collect();
+    v.sort_by(f32::total_cmp);
+    v[v.len() / 2]
+}
 
 /// Points for meaning, on the same scale as keyword hits (10 per word).
-fn sem_points(sim: f32) -> usize {
-    if sim < SEM_MIN {
+fn sem_points(sim: f32, baseline: f32) -> usize {
+    if sim < SEM_FLOOR || sim - baseline < SEM_MARGIN {
         return 0;
     }
-    10 + ((sim - SEM_MIN) * 400.0).round() as usize
+    10 + ((sim - baseline) * 200.0).round() as usize
 }
 
 /// kv key for the consent switch.
@@ -154,8 +171,9 @@ pub fn recall(
             }
         }
     }
+    let baseline = sem_baseline(similar);
     for (id, sim) in similar {
-        let points = sem_points(*sim);
+        let points = sem_points(*sim, baseline);
         if points == 0 {
             continue;
         }
@@ -535,8 +553,42 @@ mod tests {
         assert!(recall(&s, AgentId::Sharee, q, &Similar::new()).is_empty());
         let close: Similar = [(id, 0.88)].into();
         assert_eq!(recall(&s, AgentId::Sharee, q, &close).len(), 1);
-        let far: Similar = [(id, 0.78)].into();
+        let far: Similar = [(id, 0.73)].into();
         assert!(recall(&s, AgentId::Sharee, q, &far).is_empty());
+    }
+
+    #[test]
+    fn meaning_must_stand_out_from_the_rest() {
+        let mut s = store();
+        s.put(CONSENT_KEY, "on").unwrap();
+        for t in [
+            "My sister Ayesha moved to Lahore",
+            "The deployment runs every Friday evening",
+            "I prefer green tea in the morning",
+            "Our office is on the third floor",
+            "The car needs new tyres soon",
+        ] {
+            store_exchange(&mut s, t, &[]).unwrap();
+        }
+        let ids: Vec<MemoryId> = readable(&s, AgentId::Nexa, 10)
+            .into_iter()
+            .map(|r| r.0)
+            .collect();
+        // Everything scores alike (like the Roman Urdu case): nothing recalled.
+        let flat: Similar = ids
+            .iter()
+            .zip([0.777, 0.768, 0.762, 0.765, 0.770])
+            .map(|(i, v)| (*i, v))
+            .collect();
+        assert!(recall(&s, AgentId::Nexa, "zzz", &flat).is_empty());
+        // One clearly stands out: only that one.
+        let peak: Similar = ids
+            .iter()
+            .zip([0.72, 0.71, 0.80, 0.72, 0.70])
+            .map(|(i, v)| (*i, v))
+            .collect();
+        let got = recall(&s, AgentId::Nexa, "zzz", &peak);
+        assert_eq!(got.len(), 1);
     }
 
     #[test]

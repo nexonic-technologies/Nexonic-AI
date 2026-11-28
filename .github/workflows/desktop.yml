@@ -75,8 +75,9 @@ jobs:
         run: |
           brew install uv >/dev/null
           scripts/build-embed-model.sh apps/desktop/src-tauri/models-embed/multilingual-e5-small-q8_0.gguf
-      - name: Show embedding model
-        run: shasum -a 256 apps/desktop/src-tauri/models-embed/multilingual-e5-small-q8_0.gguf
+      - name: Verify embedding model
+        run: |
+          echo "64e9d486b70249537ee391c10bed279e975284006fd574bb0aadd01392cf945f  apps/desktop/src-tauri/models-embed/multilingual-e5-small-q8_0.gguf" | shasum -a 256 -c -
       - name: On-device models answer (real inference and embeddings)
         env:
           NEXONIC_MODEL: ${{ github.workspace }}/apps/desktop/src-tauri/models/qwen3.5-2b-q4_k_m.gguf
