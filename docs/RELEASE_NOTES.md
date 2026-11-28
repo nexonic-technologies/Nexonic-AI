@@ -2,7 +2,7 @@ Early preview of Nexonic AI for Macs with Apple Silicon (M1 or later, macOS 13 o
 
 ## What's inside
 
-- **Sharee and Nexa on video.** Both face you from the stage, softly blended in, and turn to each other while they talk.
+- **Sharee and Nexa on video.** Both face you from the stage on front-facing video loops that fade softly into the dark.
 - **A built-in brain that works offline.** Qwen3.5 2B ships inside the app and runs on the Mac with Metal. Nothing leaves your computer, and there is nothing else to install.
 - **Your own cloud brain, if you want one.** OpenRouter (free models by default), OpenAI, Anthropic or DeepSeek, with the key kept in the macOS Keychain.
 - **Conversation.** Sharee and Nexa answer in turn, or only the one you name, and the replies stream in as they are written.
