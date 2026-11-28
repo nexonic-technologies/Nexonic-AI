@@ -13,6 +13,8 @@ export interface Turn {
   text: string;
   /** Which model answered, e.g. "Qwen3.5 2B · on this Mac". */
   brain?: string;
+  /** How many remembered items the agent was given for this reply. */
+  remembered?: number;
   error?: string;
   streaming?: boolean;
 }
@@ -39,7 +41,8 @@ export function historyFor(agent: Agent, turns: Turn[]): ChatTurn[] {
     );
 }
 
-export function useConversation() {
+/** `onSaved` runs after an exchange wrote something to memory. */
+export function useConversation(onSaved?: (written: number) => void) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [speaking, setSpeaking] = useState<Agent | null>(null);
   const [waiting, setWaiting] = useState<Agent | null>(null);
@@ -59,6 +62,7 @@ export function useConversation() {
     if (!msg || busy.current) return;
     busy.current = true;
     commit([...log.current, { id: nextId.current++, who: "You", text: msg }]);
+    const replies: { agent: Agent; text: string }[] = [];
     try {
       for (const agent of responders(msg)) {
         const history = historyFor(agent, log.current);
@@ -68,7 +72,7 @@ export function useConversation() {
         let acc = "";
         try {
           const full = await ipc.agentReply(agent, history, (e) => {
-            if (e.kind === "start") patch(id, { brain: e.brain });
+            if (e.kind === "start") patch(id, { brain: e.brain, remembered: e.remembered });
             else {
               acc += e.text;
               setWaiting(null);
@@ -81,6 +85,7 @@ export function useConversation() {
             break;
           }
           patch(id, { text: full, streaming: false });
+          if (full.trim()) replies.push({ agent, text: full });
         } catch (err) {
           patch(id, { streaming: false, text: acc, error: String(err) });
           break;
@@ -89,10 +94,14 @@ export function useConversation() {
           setSpeaking(null);
         }
       }
+      // Explicit "remember that …" facts are kept always; the exchange only
+      // when the user turned on "Remember our conversations".
+      const written = await ipc.rememberExchange(msg, replies).catch(() => 0);
+      if (written) onSaved?.(written);
     } finally {
       busy.current = false;
     }
-  }, []);
+  }, [onSaved]);
 
   const stop = useCallback(() => {
     void ipc.brainStop();

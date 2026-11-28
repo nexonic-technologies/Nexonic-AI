@@ -26,8 +26,9 @@ Classification: **Implemented** · **Tested** · **Experimental** · **Blocked**
 | Audit fixes (26 Nov) | Tested | owner-policy handles rewritten branches; graceful encrypted-storage fallback; update check async, semver, opt-in; waveform moves only for real audio; Today's Focus save race fixed; 1280×800 Awareness panel fit |
 | On-device brain: Qwen3.5 2B (Apache-2.0, Q4_K_M 1.28 GB) shipped inside the app, run by llama.cpp with Metal; offline, nothing leaves the Mac | Implemented | `crates/model-router` (`local` feature); pinned by SHA-256, downloaded and verified on the macOS build runner; real-inference test (GPU and CPU) in CI; context sized to the Mac's memory |
 | Own-key cloud brains: OpenAI, Anthropic, DeepSeek, plus OpenRouter streaming (respects the free-only guard) | Implemented | `crates/model-router/src/cloud.rs`, `src-tauri/src/brain.rs`, Intelligence panel |
-| Conversation: Sharee and Nexa answer in turn (or only the one named), streamed; Nexa sees Sharee's reply; real states drive presence and the core | Implemented | `lib/conversation.ts`, Conversation panel; not saved to memory yet (M16) |
-| Agent memory, voice | Pending | M16/M28 |
+| Conversation: Sharee and Nexa answer in turn (or only the one named), streamed; Nexa sees Sharee's reply; real states drive presence and the core | Implemented | `lib/conversation.ts`, Conversation panel |
+| Conversation memory with consent: "Remember conversations" switch (off by default); with it on, what the user said goes to shared memory and each agent's reply to its own private memory; "remember that …" (or "Sharee, remember …") is always kept as a fact; before replying each agent recalls only the records it may read, ranked by keyword overlap, and the reply says how many it used; everything shows in Recent Memory Events and can be deleted | Tested | `src-tauri/src/recall.rs` (8 tests: consent, isolation between agents, explicit facts, bounds), `brain.rs` (memory in the system prompt), `remember_exchange` / `memory_consent` commands; recall is keyword-based, not semantic (see KNOWN_LIMITATIONS) |
+| Semantic recall, memory consolidation, voice | Pending | M20/M23/M28 |
 | OpenRouter router (catalogue, Keychain key, free-only default, 429 cooldown fallback, test completion) | Tested | `crates/model-router/src/openrouter.rs`, `src-tauri/src/keychain.rs`; opened from Intelligence → OpenRouter |
 | Character art | Interim | owner concept art; real-time digital humans in M15 |
 | Agents, model routing, voice, awareness, automation | Pending | Phases C–E |
@@ -35,4 +36,4 @@ Classification: **Implemented** · **Tested** · **Experimental** · **Blocked**
 
 ## Next actionable task
 
-Wire Sharee and Nexa agent runtimes (M16) to `memory-engine` (remember conversations with consent), then voice and lip sync on the video faces (M15/M28). Router follow-ups: use the OpenRouter cooldown fallback for streamed replies, automatic fallback between brains, optional larger on-device models for 16 GB+ Macs.
+Smarter memory: semantic recall and consolidation of old conversations into short notes (M20/M23), multi-model routing with fallback (M19), then voice and lip sync on the video faces (M15/M28). Router follow-ups: use the OpenRouter cooldown fallback for streamed replies, automatic fallback between brains, optional larger on-device models for 16 GB+ Macs.

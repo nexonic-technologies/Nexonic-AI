@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { presenceLabel, type MotionLevel, type PresenceState, type Theme } from "@nexonic/design-system";
 import { Icon, type IconName } from "./components/Icon";
 import { NeuralCore, NODE_COLORS } from "./components/NeuralCore";
@@ -148,7 +148,6 @@ export function App() {
   const [providersOpen, setProvidersOpen] = useState(false);
   const [brain, setBrain] = useState<BrainStatus | null>(null);
   const [intelOpen, setIntelOpen] = useState(false);
-  const convo = useConversation();
   const [providerInfo, setProviderInfo] = useState<ProviderStatus | null>(null);
   const [autoUpdate, setAutoUpdate] = usePersisted<boolean>("auto-update", false);
   const [updateInfo, setUpdateInfo] = useState<UpdateStatus | null>(null);
@@ -156,6 +155,12 @@ export function App() {
   const [perms, setPerms] = useState<PermissionsView | null>(null);
   const [memoryInfo, setMemoryInfo] = useState<MemorySummary | null>(null);
   const [memories, setMemories] = useState<MemoryView[]>([]);
+  const [memConsent, setMemConsent] = useState<boolean | null>(null);
+  const refreshMemory = useCallback(() => {
+    void ipc.memorySummary().then(setMemoryInfo);
+    void ipc.memoriesRecent(12).then((items) => { if (items) setMemories(items); });
+  }, []);
+  const convo = useConversation(refreshMemory);
 
   const nodes = useMemo(
     () =>
@@ -200,6 +205,7 @@ export function App() {
     });
     void ipc.providerStatus().then(setProviderInfo);
     void ipc.brainStatus().then(setBrain);
+    void ipc.memoryConsent().then(setMemConsent);
   }, []);
   useEffect(() => {
     if (!autoUpdate || !inDesktop()) return;
@@ -342,6 +348,8 @@ export function App() {
                 <MemoryPanel
                   info={memoryInfo}
                   memories={memories}
+                  consent={memConsent}
+                  onConsent={(on) => void ipc.memorySetConsent(on).then(setMemConsent)}
                   onForget={(id) => {
                     void ipc.forgetMemory(id).then(() => {
                       setMemories((cur) => cur.filter((x) => x.id !== id));
@@ -773,7 +781,7 @@ function CollabPanel({
               <b>{t.who}</b>
               {t.text ? <p>{t.text}{t.streaming && <span className="caret" aria-hidden="true" />}</p> : t.streaming ? <p className="muted">Thinking…</p> : null}
               {t.error && <p className="chat-error">{t.error}</p>}
-              {t.brain && !t.streaming && <small>{t.brain}</small>}
+              {t.brain && !t.streaming && <small>{t.brain}{t.remembered ? ` · remembered ${t.remembered} ${t.remembered === 1 ? "thing" : "things"}` : ""}</small>}
             </li>
           ))}
           <li ref={end} aria-hidden="true" />
@@ -870,15 +878,29 @@ function IntelligenceModal({
 function MemoryPanel({
   info,
   memories,
+  consent,
+  onConsent,
   onForget,
 }: {
   info: MemorySummary | null;
   memories: MemoryView[];
+  consent: boolean | null;
+  onConsent: (on: boolean) => void;
   onForget: (id: number) => void;
 }) {
   const count = info?.userVisible ?? null;
   return (
     <Panel icon="memory" title="Recent Memory Events" meta={count === null ? "—" : <><CountUp value={count} />&nbsp;stored</>}>
+      {consent !== null && (
+        <div className="mem-consent">
+          <span>
+            <b>Remember conversations</b>
+            <small>{consent ? "On · kept encrypted on this Mac" : "Off · only \u201cremember that\u2026\u201d is kept"}</small>
+          </span>
+          <button className={`pill ${consent ? "on" : ""}`} role="switch" aria-checked={consent}
+            aria-label="Remember our conversations" onClick={() => onConsent(!consent)}>{consent ? "On" : "Off"}</button>
+        </div>
+      )}
       {memories.length > 0 ? (
         <ul className="tasks mem-list">
           {memories.map((m) => (
