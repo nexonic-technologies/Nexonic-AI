@@ -10,10 +10,26 @@
 //! * Before replying, an agent recalls only records it may read (the store
 //!   enforces that), ranked by overlap with the user's message.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use nexonic_memory_engine::persist::PersistentMemory;
-use nexonic_memory_engine::{AgentId, Domain, Kind, Memory, NewMemory, Reader};
+use nexonic_memory_engine::{AgentId, Domain, Kind, Memory, MemoryId, NewMemory, Reader};
+
+/// Cosine similarity (query ↔ memory) from the on-device embedding model.
+/// Empty when the model is not available; recall then uses words only.
+pub type Similar = HashMap<MemoryId, f32>;
+
+/// Below this cosine a memory is not considered related (multilingual-E5
+/// scores unrelated text around 0.75–0.80).
+pub const SEM_MIN: f32 = 0.82;
+
+/// Points for meaning, on the same scale as keyword hits (10 per word).
+fn sem_points(sim: f32) -> usize {
+    if sim < SEM_MIN {
+        return 0;
+    }
+    10 + ((sim - SEM_MIN) * 400.0).round() as usize
+}
 
 /// kv key for the consent switch.
 pub const CONSENT_KEY: &str = "memory.conversations";
@@ -118,30 +134,50 @@ fn score(m: &Memory, query: &HashSet<String>) -> usize {
     hits * 10 * weight
 }
 
-/// Memories `agent` may read that relate to `message`, best first.
-pub fn recall(store: &PersistentMemory, agent: AgentId, message: &str) -> Vec<String> {
+/// Memories `agent` may read that relate to `message`, best first: words in
+/// common plus, when the embedding model is available, closeness in meaning.
+pub fn recall(
+    store: &PersistentMemory,
+    agent: AgentId,
+    message: &str,
+    similar: &Similar,
+) -> Vec<String> {
     let query = keywords(message);
     let reader = Reader::Agent(agent);
-    let mut seen = BTreeSet::new();
-    let mut scored: Vec<(usize, u64, String)> = Vec::new();
+    // id → (score, created_at, text)
+    let mut found: BTreeMap<MemoryId, (usize, u64, String)> = BTreeMap::new();
     if !query.is_empty() {
         for m in store.search(reader, message) {
             let s = score(m, &query);
-            if s > 0 && seen.insert(m.id) {
-                scored.push((s, m.created_at, m.text.clone()));
+            if s > 0 {
+                found.insert(m.id, (s, m.created_at, m.text.clone()));
             }
+        }
+    }
+    for (id, sim) in similar {
+        let points = sem_points(*sim);
+        if points == 0 {
+            continue;
+        }
+        // Re-checked here: only records this agent may read.
+        if let Ok(m) = store.get(reader, *id) {
+            found.entry(*id).and_modify(|e| e.0 += points).or_insert((
+                points,
+                m.created_at,
+                m.text.clone(),
+            ));
         }
     }
     // Facts the user asked an agent to keep are always in view (they are few
     // and short); conversation snippets only when they relate.
     for m in store.recent(reader, 200) {
-        if matches!(m.kind, Kind::Semantic | Kind::Preference)
-            && m.source == "user asked"
-            && seen.insert(m.id)
-        {
-            scored.push((1, m.created_at, m.text.clone()));
+        if matches!(m.kind, Kind::Semantic | Kind::Preference) && m.source == "user asked" {
+            found
+                .entry(m.id)
+                .or_insert((1, m.created_at, m.text.clone()));
         }
     }
+    let mut scored: Vec<(usize, u64, String)> = found.into_values().collect();
     scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
     let mut out = Vec::new();
     let mut used = 0;
@@ -154,6 +190,16 @@ pub fn recall(store: &PersistentMemory, agent: AgentId, message: &str) -> Vec<St
         out.push(line);
     }
     out
+}
+
+/// Records `agent` may read, for embedding: (id, text).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn readable(store: &PersistentMemory, agent: AgentId, limit: usize) -> Vec<(MemoryId, String)> {
+    store
+        .recent(Reader::Agent(agent), limit)
+        .into_iter()
+        .map(|m| (m.id, m.text.clone()))
+        .collect()
 }
 
 /// The system-prompt section listing what the agent remembers.
@@ -287,7 +333,12 @@ mod tests {
         let mut s = store();
         let n = store_exchange(&mut s, "Remember that my favourite colour is teal", &[]).unwrap();
         assert_eq!(n, 1);
-        let got = recall(&s, AgentId::Nexa, "what colour should the logo be?");
+        let got = recall(
+            &s,
+            AgentId::Nexa,
+            "what colour should the logo be?",
+            &Similar::new(),
+        );
         assert_eq!(got, vec!["my favourite colour is teal".to_string()]);
     }
 
@@ -310,8 +361,14 @@ mod tests {
             ],
         )
         .unwrap();
-        let sharee = recall(&s, AgentId::Sharee, "what about the launch?").join("\n");
-        let nexa = recall(&s, AgentId::Nexa, "what about the launch?").join("\n");
+        let sharee = recall(
+            &s,
+            AgentId::Sharee,
+            "what about the launch?",
+            &Similar::new(),
+        )
+        .join("\n");
+        let nexa = recall(&s, AgentId::Nexa, "what about the launch?", &Similar::new()).join("\n");
         assert!(sharee.contains("The user said: Plan the launch"));
         assert!(sharee.contains("checklist"));
         assert!(
@@ -334,8 +391,8 @@ mod tests {
             &[],
         )
         .unwrap();
-        assert!(!recall(&s, AgentId::Sharee, "server password").is_empty());
-        assert!(recall(&s, AgentId::Nexa, "server password").is_empty());
+        assert!(!recall(&s, AgentId::Sharee, "server password", &Similar::new()).is_empty());
+        assert!(recall(&s, AgentId::Nexa, "server password", &Similar::new()).is_empty());
     }
 
     #[test]
@@ -343,7 +400,13 @@ mod tests {
         let mut s = store();
         s.put(CONSENT_KEY, "on").unwrap();
         store_exchange(&mut s, "Help me choose a laptop for video editing", &[]).unwrap();
-        assert!(recall(&s, AgentId::Sharee, "write a poem about rain").is_empty());
+        assert!(recall(
+            &s,
+            AgentId::Sharee,
+            "write a poem about rain",
+            &Similar::new()
+        )
+        .is_empty());
     }
 
     #[test]
@@ -358,9 +421,46 @@ mod tests {
             )
             .unwrap();
         }
-        let got = recall(&s, AgentId::Nexa, "project alpha testing");
+        let got = recall(&s, AgentId::Nexa, "project alpha testing", &Similar::new());
         assert!(got.len() <= RECALL_ITEMS);
         assert!(got.iter().map(String::len).sum::<usize>() <= RECALL_CHARS);
+    }
+
+    #[test]
+    fn meaning_finds_what_words_miss() {
+        let mut s = store();
+        s.put(CONSENT_KEY, "on").unwrap();
+        store_exchange(&mut s, "My sister Ayesha moved to Lahore last month", &[]).unwrap();
+        let id = readable(&s, AgentId::Sharee, 10)[0].0;
+        let q = "what is my sibling's name?";
+        assert!(recall(&s, AgentId::Sharee, q, &Similar::new()).is_empty());
+        let close: Similar = [(id, 0.88)].into();
+        assert_eq!(recall(&s, AgentId::Sharee, q, &close).len(), 1);
+        let far: Similar = [(id, 0.78)].into();
+        assert!(recall(&s, AgentId::Sharee, q, &far).is_empty());
+    }
+
+    #[test]
+    fn meaning_never_crosses_privacy() {
+        let mut s = store();
+        s.put(CONSENT_KEY, "on").unwrap();
+        store_exchange(
+            &mut s,
+            "hello there friend",
+            &[(
+                AgentId::Nexa,
+                "Nexa's private thought about the surprise party plans".into(),
+            )],
+        )
+        .unwrap();
+        let nexa_ids: Vec<MemoryId> = readable(&s, AgentId::Nexa, 10)
+            .into_iter()
+            .map(|r| r.0)
+            .collect();
+        // Even a perfect similarity for Nexa's private record must not reach Sharee.
+        let leak: Similar = nexa_ids.iter().map(|id| (*id, 0.99)).collect();
+        let got = recall(&s, AgentId::Sharee, "party", &leak).join("\n");
+        assert!(!got.contains("surprise party"));
     }
 
     #[test]

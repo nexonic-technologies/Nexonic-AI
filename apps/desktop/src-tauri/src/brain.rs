@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use nexonic_model_router::{
-    cloud, provider, GenOptions, Message, Role, RouterError, StopFlag, BUNDLED_MODEL, PROVIDERS,
+    cloud, provider, GenOptions, Message, Role, RouterError, StopFlag, BUNDLED_MODEL, EMBED_MODEL,
+    PROVIDERS,
 };
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
@@ -25,6 +26,10 @@ pub struct BrainState {
     stop: Arc<StopFlag>,
     #[cfg(target_os = "macos")]
     engine: Mutex<Option<nexonic_model_router::local::LocalEngine>>,
+    /// The embedding model for recall by meaning; an error is kept so a
+    /// broken model is not reloaded on every reply.
+    #[cfg(target_os = "macos")]
+    embedder: Mutex<Option<Result<nexonic_model_router::embed::Embedder, String>>>,
     /// Serialises replies so Sharee and Nexa never talk over each other.
     busy: Mutex<()>,
 }
@@ -35,6 +40,8 @@ impl Default for BrainState {
             stop: Arc::new(StopFlag::default()),
             #[cfg(target_os = "macos")]
             engine: Mutex::new(None),
+            #[cfg(target_os = "macos")]
+            embedder: Mutex::new(None),
             busy: Mutex::new(()),
         }
     }
@@ -125,6 +132,94 @@ fn find_model(app: &AppHandle) -> Option<PathBuf> {
     model_candidates(app).into_iter().find(|p| p.is_file())
 }
 
+fn find_embed_model(app: &AppHandle) -> Option<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(p) = std::env::var("NEXONIC_EMBED_MODEL") {
+        paths.push(PathBuf::from(p));
+    }
+    if let Ok(dir) = app.path().resource_dir() {
+        paths.push(dir.join("models").join(EMBED_MODEL.file));
+    }
+    if let Ok(dir) = app.path().app_data_dir() {
+        paths.push(dir.join("models").join(EMBED_MODEL.file));
+    }
+    paths.into_iter().find(|p| p.is_file())
+}
+
+/// Closeness in meaning between the user's message and every memory `agent`
+/// may read. Memories without a vector are embedded once and the vector is
+/// stored encrypted next to them. Empty when the model is unavailable.
+#[cfg(target_os = "macos")]
+fn similar(
+    app: &AppHandle,
+    state: &AppState,
+    brain: &BrainState,
+    agent: nexonic_memory_engine::AgentId,
+    query: &str,
+) -> crate::recall::Similar {
+    use nexonic_model_router::embed::{as_passage, as_query, cosine, Embedder};
+    let mut out = crate::recall::Similar::new();
+    if query.trim().is_empty() {
+        return out;
+    }
+    let Some(path) = find_embed_model(app) else {
+        return out;
+    };
+    let Ok(mut slot) = brain.embedder.lock() else {
+        return out;
+    };
+    if slot.is_none() {
+        *slot = Some(Embedder::start(&path).map_err(|e| e.to_string()));
+    }
+    let Some(Ok(emb)) = slot.as_ref() else {
+        return out;
+    };
+    let mut have = Vec::new();
+    let mut missing = Vec::new();
+    {
+        let Ok(m) = state.memory.lock() else {
+            return out;
+        };
+        for (id, text) in crate::recall::readable(&m, agent, 400) {
+            match m.vector(id) {
+                Ok(Some(v)) if v.len() == emb.dims() => have.push((id, v)),
+                _ => missing.push((id, text)),
+            }
+        }
+    }
+    for chunk in missing.chunks(32) {
+        let texts: Vec<String> = chunk.iter().map(|(_, t)| as_passage(t)).collect();
+        let Ok(vectors) = emb.embed(&texts) else {
+            break;
+        };
+        if let Ok(mut m) = state.memory.lock() {
+            for ((id, _), v) in chunk.iter().zip(vectors) {
+                let _ = m.put_vector(*id, &v);
+                have.push((*id, v));
+            }
+        }
+    }
+    let Ok(mut q) = emb.embed(&[as_query(query)]) else {
+        return out;
+    };
+    let q = q.remove(0);
+    for (id, v) in have {
+        out.insert(id, cosine(&q, &v));
+    }
+    out
+}
+
+#[cfg(not(target_os = "macos"))]
+fn similar(
+    _app: &AppHandle,
+    _state: &AppState,
+    _brain: &BrainState,
+    _agent: nexonic_memory_engine::AgentId,
+    _query: &str,
+) -> crate::recall::Similar {
+    crate::recall::Similar::new()
+}
+
 fn kv(state: &AppState, key: &str) -> Option<String> {
     state.memory.lock().ok()?.get_value(key).ok().flatten()
 }
@@ -153,6 +248,8 @@ pub struct LocalStatus {
     pub supported: bool,
     pub loaded: bool,
     pub context_tokens: Option<u32>,
+    /// The embedding model for memory recall by meaning is in this build.
+    pub embeddings: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -228,6 +325,7 @@ fn status(app: &AppHandle, state: &AppState, brain: &BrainState) -> BrainStatus 
             supported,
             loaded,
             context_tokens: ctx,
+            embeddings: supported && find_embed_model(app).is_some(),
         },
         providers,
     }
@@ -367,9 +465,16 @@ fn reply_blocking(
         .find(|m| m.role == Role::User && !m.content.starts_with('['))
         .map(|m| m.content.clone())
         .unwrap_or_default();
-    let remembered: Vec<String> = match (crate::recall::agent_id(agent), state.memory.lock()) {
-        (Some(id), Ok(store)) => crate::recall::recall(&store, id, &user_text),
-        _ => Vec::new(),
+    let remembered: Vec<String> = match crate::recall::agent_id(agent) {
+        Some(id) => {
+            let close = similar(app, &state, &brain, id, &user_text);
+            state
+                .memory
+                .lock()
+                .map(|store| crate::recall::recall(&store, id, &user_text, &close))
+                .unwrap_or_default()
+        }
+        None => Vec::new(),
     };
     let section = crate::recall::memory_section(&remembered);
     let mut send = |t: &str| {

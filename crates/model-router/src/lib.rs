@@ -45,7 +45,7 @@ pub const EMBED_MODEL: EmbedModel = EmbedModel {
     file: "multilingual-e5-small-q8_0.gguf",
     licence: "MIT",
     repo: "intfloat/multilingual-e5-small",
-    revision: "7cf867cae19b6df205046e9c11907797649fb552",
+    revision: "fd1525a9fd15316a2d503bf26ab031a61d056e98",
     weights_sha256: "1a55775f53449dac10a2bcbc312469fac40b96d53198c407081a831f81c98477",
 };
 

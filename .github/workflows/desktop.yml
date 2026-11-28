@@ -67,7 +67,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: apps/desktop/src-tauri/models-embed
-          key: embed-multilingual-e5-small-7cf867ca-q8_0-v1
+          key: embed-multilingual-e5-small-fd1525a9-q8_0-v1
       - name: Build embedding model
         if: steps.embed.outputs.cache-hit != 'true'
         env:

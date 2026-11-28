@@ -11,7 +11,7 @@ set -euo pipefail
 
 OUT="${1:?usage: build-embed-model.sh <out.gguf>}"
 REPO="intfloat/multilingual-e5-small"
-REV="7cf867cae19b6df205046e9c11907797649fb552"
+REV="fd1525a9fd15316a2d503bf26ab031a61d056e98"
 WEIGHTS_SHA="1a55775f53449dac10a2bcbc312469fac40b96d53198c407081a831f81c98477"
 # llama-cpp-sys-2 0.1.161 (Cargo.lock) was published from this llama-cpp-rs commit.
 LLAMA_RS_COMMIT="e7af607ebd5ec2932709ef918c17cca2f9b0fce4"
