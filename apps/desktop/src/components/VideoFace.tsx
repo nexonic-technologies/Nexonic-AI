@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from "react";
 export type ClipName = "idle" | "chat" | "look" | "listen" | "talk" | "smile";
 export type ClipSet = Partial<Record<ClipName, string>>;
 export type FaceBox = { cx: number; cy: number; w: number };
+export type ClipFaces = Partial<Record<ClipName, FaceBox>>;
 
 const FADE_MS = 320;
 const FACE_X = 0.5;
@@ -26,31 +27,42 @@ const FACE_W = 0.4;
 // box = x, y, w, h of the picture in canvas units (0–1, origin top-left)
 const VERT = `attribute vec2 p; varying vec2 uv; varying vec2 sp; uniform vec4 box;
 void main(){ uv = p; vec2 q = box.xy + p * box.zw; sp = q; gl_Position = vec4(q.x * 2.0 - 1.0, 1.0 - q.y * 2.0, 0.0, 1.0); }`;
-// sp = position on the canvas (0–1, origin top-left). The fade is measured on the
-// canvas, not on the video frame, so the body always melts into the stage, however
-// the clip is scaled to line the faces up: no straight cut at the bottom or sides.
+// sp = position on the canvas (0–1, origin top-left). The fade is measured around
+// the face on the canvas, not on the video frame: the head stays sharp, the
+// shoulders and chest dissolve into the stage well before the clip's own edges,
+// so there is never a straight cut at the sides or bottom, whatever the clip.
+// fc = face centre on the canvas (0–1), fw = face width in canvas pixels,
+// res = canvas size in pixels.
 const FRAG = `precision mediump float; varying vec2 uv; varying vec2 sp; uniform sampler2D tex; uniform float alpha;
+uniform vec2 fc; uniform float fw; uniform vec2 res;
 void main(){
   vec3 c = texture2D(tex, vec2(uv.x * 0.5, uv.y)).rgb;
   float a = texture2D(tex, vec2(0.5 + uv.x * 0.5, uv.y)).r;
-  // never show the clip's own frame edges
-  float frame = smoothstep(0.0, 0.05, uv.x) * smoothstep(1.0, 0.95, uv.x) * smoothstep(1.0, 0.93, uv.y);
-  // soft oval around head and shoulders, long fade down the chest
-  vec2 d = (sp - vec2(0.5, 0.4)) / vec2(0.56, 0.66);
-  float oval = 1.0 - smoothstep(0.72, 1.0, length(d));
-  float low = smoothstep(1.0, 0.58, sp.y);
+  // distance from the face centre, in face widths
+  vec2 d = (sp - fc) * res / fw;
+  float ax = abs(d.x);
+  float vy = d.y;
+  // the head stays whole; from the neck down the sides close in, like a bust
+  float edge0 = mix(0.85, 0.42, smoothstep(0.35, 1.5, vy));
+  float edge1 = mix(1.05, 0.86, smoothstep(0.35, 1.5, vy));
+  float sides = 1.0 - smoothstep(edge0, edge1, ax);
+  // long, soft fade down the chest
+  float low = 1.0 - smoothstep(0.95, 1.9, vy);
   low = low * low * (3.0 - 2.0 * low);
-  float sides = smoothstep(0.0, 0.14, sp.x) * smoothstep(1.0, 0.86, sp.x);
-  float fade = oval * low * sides;
+  // safety: never show the clip's own frame edges or the canvas edges
+  float frame = smoothstep(0.0, 0.1, uv.x) * smoothstep(1.0, 0.9, uv.x) * smoothstep(1.0, 0.86, uv.y);
+  float canvasEdge = smoothstep(0.0, 0.05, sp.x) * smoothstep(1.0, 0.95, sp.x) * smoothstep(1.0, 0.9, sp.y);
+  float fade = sides * low * frame * canvasEdge;
   // light falls off where the body fades, like a figure lit in a dark room
-  c *= mix(0.55, 1.0, smoothstep(0.0, 0.8, fade));
-  a *= frame * fade * alpha;
+  c *= mix(0.5, 1.0, smoothstep(0.0, 0.85, fade));
+  a *= fade * alpha;
   gl_FragColor = vec4(c * a, a);
 }`;
 
 export function VideoFace({
   clips,
   face,
+  clipFaces,
   fallback,
   want,
   onDone,
@@ -59,6 +71,8 @@ export function VideoFace({
 }: {
   clips: ClipSet;
   face?: FaceBox;
+  /** Face measured in each clip, so every clip lands on the same spot. */
+  clipFaces?: ClipFaces;
   fallback?: string;
   /** Clip the behaviour engine wants now; one-shot clips play to the end once. */
   want: ClipName;
@@ -103,6 +117,9 @@ export function VideoFace({
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     const uBox = gl.getUniformLocation(prog, "box");
     const uAlpha = gl.getUniformLocation(prog, "alpha");
+    const uFc = gl.getUniformLocation(prog, "fc");
+    const uFw = gl.getUniformLocation(prog, "fw");
+    const uRes = gl.getUniformLocation(prog, "res");
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
@@ -171,7 +188,8 @@ export function VideoFace({
     ro.observe(canvas);
     syncSize();
 
-    const draw = (p: { v: HTMLVideoElement; t: WebGLTexture }, a: number) => {
+    const draw = (name: ClipName, p: { v: HTMLVideoElement; t: WebGLTexture }, a: number) => {
+      const box = clipFaces?.[name] ?? face;
       const v = p.v;
       if (v.readyState < 2 || !v.videoWidth) return;
       gl.bindTexture(gl.TEXTURE_2D, p.t);
@@ -184,18 +202,18 @@ export function VideoFace({
       let h: number;
       let x: number;
       let y: number;
-      if (face) {
+      if (box) {
         // Keep the head consistent horizontally while scaling down on compact screens
         // so the shoulders and chin always stay cleanly above the nameplate.
-        w = Math.min((FACE_W * cw) / face.w, (0.52 * ch) / face.w);
+        w = Math.min((FACE_W * cw) / box.w, (0.52 * ch) / box.w);
         h = (w * ih) / iw;
         const maxH = ch * 1.12;
         if (h > maxH) {
           h = maxH;
           w = (h * iw) / ih;
         }
-        x = cw * FACE_X - face.cx * w;
-        y = Math.min(cw * 0 + ch * FACE_Y - face.cy * h, ch - h * 0.92);
+        x = cw * FACE_X - box.cx * w;
+        y = Math.min(ch * FACE_Y - box.cy * h, ch - h * 0.92);
         y = Math.max(y, -h * 0.04);
       } else {
         const s = Math.min(cw / iw, ch / ih);
@@ -205,6 +223,14 @@ export function VideoFace({
         y = ch - h;
       }
       gl.uniform4f(uBox, x / cw, y / ch, w / cw, h / ch);
+      if (box) {
+        gl.uniform2f(uFc, (x + box.cx * w) / cw, (y + box.cy * h) / ch);
+        gl.uniform1f(uFw, box.w * w);
+      } else {
+        gl.uniform2f(uFc, 0.5, 0.4);
+        gl.uniform1f(uFw, 0.4 * cw);
+      }
+      gl.uniform2f(uRes, cw, ch);
       gl.uniform1f(uAlpha, a);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     };
@@ -228,14 +254,14 @@ export function VideoFace({
       const t = Math.min(1, (now - fadeStart) / FADE_MS);
       if (previous && t < 1) {
         const pp = players.get(previous);
-        if (pp) draw(pp, 1);
+        if (pp) draw(previous, pp, 1);
       } else if (previous && t >= 1) {
         const pp = players.get(previous);
         if (pp && previous !== "idle") pp.v.pause();
         previous = null;
       }
       const cur = players.get(current)!;
-      draw(cur, previous ? t * t * (3 - 2 * t) : 1);
+      draw(current, cur, previous ? t * t * (3 - 2 * t) : 1);
     };
     raf = requestAnimationFrame(frame);
 
@@ -254,7 +280,7 @@ export function VideoFace({
       gl.deleteShader(vs);
       gl.deleteShader(fs);
     };
-  }, [clips, face, reduced]);
+  }, [clips, face, clipFaces, reduced]);
 
   if (webglFailed && fallback) return <img className="portrait" src={fallback} alt={label} draggable={false} />;
   return <canvas ref={canvasRef} className="portrait live" role="img" aria-label={label} />;

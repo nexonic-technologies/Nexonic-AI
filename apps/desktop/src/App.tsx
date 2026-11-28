@@ -4,7 +4,7 @@ import { Icon, type IconName } from "./components/Icon";
 import { NeuralCore, NODE_COLORS } from "./components/NeuralCore";
 import { DataLinks } from "./components/DataLinks";
 import { LiveFace, type FaceAtlas, type Gaze, type Mood } from "./components/LiveFace";
-import { VideoFace, type ClipName, type ClipSet, type FaceBox } from "./components/VideoFace";
+import { VideoFace, type ClipFaces, type ClipName, type ClipSet, type FaceBox } from "./components/VideoFace";
 import { MOOD_LABEL, TEMPERAMENT, usePresenceMood } from "./lib/presenceMood";
 import { CountUp, RollText, ScrambleText, SplitText, useCycle } from "./components/MotionText";
 import { capabilityLabel, formatBytes, inDesktop, ipc, type BrainStatus, type Capability, type CompletionResult, type MemorySummary, type MemoryView, type PermissionsView, type ProviderStatus, type SystemInfo, type UpdateStatus } from "./lib/ipc";
@@ -40,8 +40,9 @@ const ATLAS: Record<Agent, FaceAtlas | null> = { Sharee: loadAtlas("Sharee"), Ne
 
 // Real video clips (services/presence/process_clip.py): colour and alpha packed side by side.
 const CLIP_FILES = import.meta.glob<string>("./assets/clips/*/*.mp4", { eager: true, query: "?url", import: "default" });
-const CLIP_MANIFEST = import.meta.glob<{ faces: Record<string, FaceBox> }>("./assets/clips/manifest.json", { eager: true, import: "default" });
-function loadClips(who: Agent): { clips: ClipSet; face?: FaceBox } | null {
+const CLIP_MANIFEST = import.meta.glob<{ faces: Record<string, FaceBox>; clips?: Record<string, ClipFaces> }>("./assets/clips/manifest.json", { eager: true, import: "default" });
+type VideoSet = { clips: ClipSet; face?: FaceBox; clipFaces?: ClipFaces };
+function loadClips(who: Agent): VideoSet | null {
   const clips: ClipSet = {};
   const dir = `/clips/${who.toLowerCase()}/`;
   for (const [path, url] of Object.entries(CLIP_FILES)) {
@@ -49,9 +50,13 @@ function loadClips(who: Agent): { clips: ClipSet; face?: FaceBox } | null {
     if (at >= 0) clips[path.slice(at + dir.length, -".mp4".length) as ClipName] = url;
   }
   if (!clips.idle) return null;
-  return { clips, face: Object.values(CLIP_MANIFEST)[0]?.faces[who.toLowerCase()] };
+  const m = Object.values(CLIP_MANIFEST)[0];
+  return { clips, face: m?.faces[who.toLowerCase()], clipFaces: m?.clips?.[who.toLowerCase()] };
 }
-const CLIPS: Record<Agent, { clips: ClipSet; face?: FaceBox } | null> = { Sharee: loadClips("Sharee"), Nexa: loadClips("Nexa") };
+const CLIPS: Record<Agent, VideoSet | null> = { Sharee: loadClips("Sharee"), Nexa: loadClips("Nexa") };
+// They only turn to each other when both have a matching chat clip; otherwise
+// each keeps its own idle loop and nothing switches.
+const PARTNER_CHAT = Boolean(CLIPS.Sharee?.clips.chat && CLIPS.Nexa?.clips.chat);
 
 /**
  * When nobody is talking to them, Sharee and Nexa now and then turn to each
@@ -236,7 +241,7 @@ export function App() {
     const t = window.setTimeout(() => setQuiet(true), 6000);
     return () => window.clearTimeout(t);
   }, [draft, sentAt]);
-  const chatting = usePartnerChat(quiet && !convo.busy && convo.turns.length === 0, reduced);
+  const chatting = usePartnerChat(PARTNER_CHAT && quiet && !convo.busy && convo.turns.length === 0, reduced);
   const clipWant: ClipName = chatting ? "chat" : "idle";
 
   return (
@@ -581,7 +586,7 @@ function Presence({
         <span className="holo-spot" aria-hidden="true" />
         <span className="holo-ring" aria-hidden="true" />
         {video ? (
-          <VideoFace clips={video.clips} face={video.face} fallback={FALLBACK[name]} want={clip} reduced={reduced} label={`${name} portrait`} />
+          <VideoFace clips={video.clips} face={video.face} clipFaces={video.clipFaces} fallback={FALLBACK[name]} want={clip} reduced={reduced} label={`${name} portrait`} />
         ) : (
         <LiveFace
           atlas={ATLAS[name]}
