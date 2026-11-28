@@ -25,6 +25,8 @@ Status: ✅ done · 🔶 in progress · ⛔ blocked · ⬜ pending
 | M14 | Floating assistants and background interface | ⬜ |
 | M15 | Digital-human rendering infrastructure | 🔶 on-device talking probe (LivePortrait + JoyVASA MLX) |
 
+**Custom avatars (owner decision 28 Nov, part of M08/M13).** Settings → Avatars lets the user replace Sharee's or Nexa's video with their own. Generation stays outside the app: the user makes the clip in Google Flow (or a similar tool) by following an in-app guide with the exact steps and prompts (front-facing portrait, start frame = end frame, silent, 1080p, 9:16). The app only takes the upload, checks it (length, single frontal face, clean loop), cuts out the person, aligns the face on the stage on the Mac, shows a preview, and keeps a "Restore default" option. A consent line asks users to use only their own likeness or one they have rights to.
+
 ## Phase C — Core intelligence
 | | Milestone | Status |
 |---|---|---|
