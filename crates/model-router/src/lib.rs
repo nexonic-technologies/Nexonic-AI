@@ -16,6 +16,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 pub mod cloud;
 #[cfg(feature = "local")]
+pub mod embed;
+#[cfg(feature = "local")]
 pub mod local;
 pub mod openrouter;
 
@@ -34,6 +36,29 @@ pub const BUNDLED_MODEL: BundledModel = BundledModel {
     sha256: "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
     source: "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf",
 };
+
+/// The embedding model shipped inside the app for memory recall by meaning.
+/// Converted to GGUF (Q8_0) at build time from the official files at a pinned
+/// revision with llama.cpp's own converter (see .github/workflows/desktop.yml).
+pub const EMBED_MODEL: EmbedModel = EmbedModel {
+    name: "multilingual-E5-small",
+    file: "multilingual-e5-small-q8_0.gguf",
+    licence: "MIT",
+    repo: "intfloat/multilingual-e5-small",
+    revision: "7cf867cae19b6df205046e9c11907797649fb552",
+    weights_sha256: "1a55775f53449dac10a2bcbc312469fac40b96d53198c407081a831f81c98477",
+};
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct EmbedModel {
+    pub name: &'static str,
+    pub file: &'static str,
+    pub licence: &'static str,
+    pub repo: &'static str,
+    pub revision: &'static str,
+    /// SHA-256 of the official model.safetensors at `revision`.
+    pub weights_sha256: &'static str,
+}
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct BundledModel {

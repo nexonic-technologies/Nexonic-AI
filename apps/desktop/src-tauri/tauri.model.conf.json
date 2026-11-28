@@ -1,7 +1,8 @@
 {
   "bundle": {
     "resources": {
-      "models/qwen3.5-2b-q4_k_m.gguf": "models/qwen3.5-2b-q4_k_m.gguf"
+      "models/qwen3.5-2b-q4_k_m.gguf": "models/qwen3.5-2b-q4_k_m.gguf",
+      "models-embed/multilingual-e5-small-q8_0.gguf": "models/multilingual-e5-small-q8_0.gguf"
     }
   }
 }
